@@ -1,7 +1,7 @@
 # --- Standard libraries ---
 import os
 import logging
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Union
 
 # --- Third-party libraries ---
 from supabase import create_client, Client
@@ -30,11 +30,22 @@ def get_supabase_client() -> Client:
         _supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
     return _supabase_client
 
-async def get_user_data(user_id: int) -> Dict[str, Any]:
+async def get_user_data(user_id: Optional[int]) -> Dict[str, Any]:
     """
     Получение данных пользователя из базы данных.
     Если пользователя нет, создается новая запись.
+    Если user_id равен None, возвращаются данные по умолчанию.
     """
+    if user_id is None:
+        return {
+            "user_id": None,
+            "balance": 0,
+            "active": False,
+            "last_menu_message_id": None,
+            "userbot_enabled": False,
+            "userbot_balance": 0
+        }
+        
     try:
         supabase = get_supabase_client()
         
@@ -69,7 +80,7 @@ async def get_user_data(user_id: int) -> Dict[str, Any]:
             "userbot_balance": 0
         }
 
-async def update_user_data(user_id: int, data: Dict[str, Any]) -> Dict[str, Any]:
+async def update_user_data(user_id: int, data: Dict[str, Any]) -> Union[Dict[str, Any], None]:
     """
     Обновление данных пользователя в базе данных.
     """
@@ -143,7 +154,7 @@ async def get_user_profiles(user_id: int) -> List[Dict[str, Any]]:
             "done": False
         }]
 
-async def add_user_profile(user_id: int, profile_data: Dict[str, Any]) -> Dict[str, Any]:
+async def add_user_profile(user_id: int, profile_data: Dict[str, Any]) -> Union[Dict[str, Any], None]:
     """
     Добавление нового профиля пользователя.
     """
@@ -161,7 +172,7 @@ async def add_user_profile(user_id: int, profile_data: Dict[str, Any]) -> Dict[s
         logger.error(f"Ошибка при добавлении профиля пользователя: {e}")
         return None
 
-async def update_user_profile(profile_id: int, profile_data: Dict[str, Any]) -> Dict[str, Any]:
+async def update_user_profile(profile_id: int, profile_data: Dict[str, Any]) -> Union[Dict[str, Any], None]:
     """
     Обновление профиля пользователя.
     """
@@ -245,58 +256,55 @@ async def update_user_userbot_balance(user_id: int, delta: int) -> int:
         logger.error(f"Ошибка при обновлении баланса юзербота пользователя: {e}")
         return 0
 
-async def get_user_userbot_data(user_id: int) -> Dict[str, Any]:
+async def get_user_userbot_data(user_id: int) -> Union[Dict[str, Any], None]:
     """
     Получение данных юзербота пользователя.
     """
     try:
-        supabase = get_supabase_client()
-        
-        # Проверяем, существует ли юзербот для пользователя
-        response = supabase.table("userbots").select("*").eq("user_id", user_id).execute()
-        
-        if len(response.data) == 0:
-            # Если юзербота нет, возвращаем пустые данные
-            return {
-                "api_id": None,
-                "api_hash": None,
-                "phone": None,
-                "user_id": user_id,
-                "username": None,
-                "enabled": False
-            }
-        
-        return response.data[0]
+        user_data = await get_user_data(user_id)
+        userbot_data = {
+            "api_id": user_data.get("userbot_api_id"),
+            "api_hash": user_data.get("userbot_api_hash"),
+            "phone": user_data.get("userbot_phone"),
+            "user_id": user_data.get("userbot_user_id"),
+            "username": user_data.get("userbot_username"),
+            "balance": user_data.get("userbot_balance", 0),
+            "enabled": user_data.get("userbot_enabled", False)
+        }
+        return userbot_data
     except Exception as e:
         logger.error(f"Ошибка при получении данных юзербота пользователя: {e}")
-        return {
-            "api_id": None,
-            "api_hash": None,
-            "phone": None,
-            "user_id": user_id,
-            "username": None,
-            "enabled": False
-        }
+        return None
 
-async def update_user_userbot_data(user_id: int, data: Dict[str, Any]) -> Dict[str, Any]:
+async def update_user_userbot_data(user_id: int, data: Dict[str, Any]) -> Union[Dict[str, Any], None]:
     """
     Обновление данных юзербота пользователя.
     """
     try:
-        supabase = get_supabase_client()
+        # Преобразуем данные юзербота в формат для хранения в таблице users
+        user_data = {
+            "userbot_api_id": data.get("api_id"),
+            "userbot_api_hash": data.get("api_hash"),
+            "userbot_phone": data.get("phone"),
+            "userbot_user_id": data.get("user_id"),
+            "userbot_username": data.get("username"),
+            "userbot_balance": data.get("balance", 0),
+            "userbot_enabled": data.get("enabled", False)
+        }
         
-        # Проверяем, существует ли юзербот для пользователя
-        response = supabase.table("userbots").select("*").eq("user_id", user_id).execute()
-        
-        if len(response.data) == 0:
-            # Если юзербота нет, создаем новую запись
-            data["user_id"] = user_id
-            response = supabase.table("userbots").insert(data).execute()
-        else:
-            # Если юзербот есть, обновляем данные
-            response = supabase.table("userbots").update(data).eq("user_id", user_id).execute()
-        
-        return response.data[0]
+        # Обновляем данные в таблице users
+        result = await update_user_data(user_id, user_data)
+        if result:
+            return {
+                "api_id": result.get("userbot_api_id"),
+                "api_hash": result.get("userbot_api_hash"),
+                "phone": result.get("userbot_phone"),
+                "user_id": result.get("userbot_user_id"),
+                "username": result.get("userbot_username"),
+                "balance": result.get("userbot_balance", 0),
+                "enabled": result.get("userbot_enabled", False)
+            }
+        return None
     except Exception as e:
         logger.error(f"Ошибка при обновлении данных юзербота пользователя: {e}")
         return None 

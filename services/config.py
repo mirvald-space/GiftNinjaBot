@@ -1,23 +1,23 @@
 # --- Standard libraries ---
-import json
 import os
 import logging
-from typing import Optional
+from typing import Optional, Dict, Any, List
 
 # --- Third-party libraries ---
-import aiofiles
+# Удаляем aiofiles, так как больше не нужен для работы с файлами
+
+# --- Internal modules ---
+from services.database import get_user_data, update_user_data, get_user_profiles
 
 logger = logging.getLogger(__name__)
 
 CURRENCY = 'XTR'
 VERSION = '1.0.0'
-CONFIG_PATH = "config.json"
+# Удаляем CONFIG_PATH, так как больше не используем файл
 DEV_MODE = False # Purchase of test gifts
 MAX_PROFILES = 3 # Maximum message length is 4096 characters
 PURCHASE_COOLDOWN = 0.3 # Number of purchases per second
 USERBOT_UPDATE_COOLDOWN = 50 # Base waiting time in seconds for requesting gift list through userbot
-# В публичном режиме не используем список разрешенных пользователей
-# ALLOWED_USER_IDS = []
 
 def add_allowed_user(user_id):
     # В публичном режиме эта функция ничего не делает
@@ -26,366 +26,248 @@ def add_allowed_user(user_id):
 def DEFAULT_PROFILE(user_id: int) -> dict:
     """Creates a profile with default settings for the specified user."""
     return {
-        "NAME": None,
-        "MIN_PRICE": 5000,
-        "MAX_PRICE": 10000,
-        "MIN_SUPPLY": 1000,
-        "MAX_SUPPLY": 10000,
-        "LIMIT": 1000000,
-        "COUNT": 5,
-        "TARGET_USER_ID": user_id,
-        "TARGET_CHAT_ID": None,
-        "TARGET_TYPE": None,
-        "SENDER": "bot",
-        "BOUGHT": 0,
-        "SPENT": 0,
-        "DONE": False
+        "user_id": user_id,
+        "name": None,
+        "min_price": 5000,
+        "max_price": 10000,
+        "min_supply": 1000,
+        "max_supply": 10000,
+        "limit": 1000000,
+        "count": 5,
+        "target_user_id": user_id,
+        "target_chat_id": None,
+        "target_type": None,
+        "sender": "bot",
+        "bought": 0,
+        "spent": 0,
+        "done": False
     }
 
-def DEFAULT_CONFIG(user_id: int) -> dict:
-    """Default configuration: global fields + list of profiles."""
-    return {
-        "BALANCE": 0,
-        "ACTIVE": False,
-        "LAST_MENU_MESSAGE_ID": None,
-        "PROFILES": [DEFAULT_PROFILE(user_id)],
+# Заменяем старые функции на новые, работающие с Supabase
+
+async def get_valid_config(user_id: int) -> dict:
+    """
+    Получает данные пользователя из Supabase.
+    Сохраняется для обратной совместимости со старым кодом.
+    """
+    user_data = await get_user_data(user_id)
+    profiles = await get_user_profiles(user_id)
+    
+    # Преобразуем данные из Supabase в формат, совместимый со старыми функциями
+    config = {
+        "BALANCE": user_data.get("balance", 0),
+        "ACTIVE": user_data.get("active", False),
+        "LAST_MENU_MESSAGE_ID": user_data.get("last_menu_message_id"),
+        "PROFILES": profiles if profiles else [DEFAULT_PROFILE(user_id)],
         "USERBOT": {
-            "API_ID": None,
-            "API_HASH": None,
-            "PHONE": None,
-            "USER_ID": None,
-            "USERNAME": None,
-            "BALANCE": 0,
-            "ENABLED": False
+            "API_ID": user_data.get("userbot_api_id"),
+            "API_HASH": user_data.get("userbot_api_hash"),
+            "PHONE": user_data.get("userbot_phone"),
+            "USER_ID": user_data.get("userbot_user_id"),
+            "USERNAME": user_data.get("userbot_username"),
+            "BALANCE": user_data.get("userbot_balance", 0),
+            "ENABLED": user_data.get("userbot_enabled", False)
         }
     }
+    return config
 
-# Types and requirements for each profile field
-PROFILE_TYPES = {
-    "NAME": (str, True),
-    "MIN_PRICE": (int, False),
-    "MAX_PRICE": (int, False),
-    "MIN_SUPPLY": (int, False),
-    "MAX_SUPPLY": (int, False),
-    "LIMIT": (int, False),
-    "COUNT": (int, False),
-    "TARGET_USER_ID": (int, True),
-    "TARGET_CHAT_ID": (str, True),
-    "TARGET_TYPE": (str, True),
-    "SENDER": (str, True),
-    "BOUGHT": (int, False),
-    "SPENT": (int, False),
-    "DONE": (bool, False),
-}
-
-# Types and requirements for global fields
-CONFIG_TYPES = {
-    "BALANCE": (int, False),
-    "ACTIVE": (bool, False),
-    "LAST_MENU_MESSAGE_ID": (int, True),
-    "PROFILES": (list, False),
-    "USERBOT": (dict, False)
-}
-
-
-def is_valid_type(value, expected_type, allow_none=False):
+async def save_config(config: dict):
     """
-    Checks the type of value with None allowance.
+    Сохраняет конфигурацию в Supabase.
+    Сохраняется для обратной совместимости со старым кодом.
     """
-    if value is None:
-        return allow_none
-    return isinstance(value, expected_type)
-
-
-async def ensure_config(user_id: int, path: str = CONFIG_PATH):
-    """
-    Ensures the existence of config.json.
-    """
-    if not os.path.exists(path):
-        async with aiofiles.open(path, mode="w", encoding="utf-8") as f:
-            await f.write(json.dumps(DEFAULT_CONFIG(user_id), indent=2))
-        logger.info(f"Configuration created: {path}")
-
-
-async def load_config(path: str = CONFIG_PATH) -> dict:
-    """
-    Loads config from file (without validation). Ensures that the file exists.
-    """
-    if not os.path.exists(path):
-        raise FileNotFoundError(f"File {path} not found. Use ensure_config.")
-    async with aiofiles.open(path, mode="r", encoding="utf-8") as f:
-        data = await f.read()
-        return json.loads(data)
-
-
-async def save_config(config: dict, path: str = CONFIG_PATH):
-    """
-    Saves config to file.
-    """
-    async with aiofiles.open(path, mode="w", encoding="utf-8") as f:
-        await f.write(json.dumps(config, indent=2))
-    logger.info(f"Configuration saved.")
-
-
-async def validate_profile(profile: dict, user_id: Optional[int] = None) -> dict:
-    """
-    Validates one profile.
-    """
-    valid = {}
-    default = DEFAULT_PROFILE(user_id or 0)
-    for key, (expected_type, allow_none) in PROFILE_TYPES.items():
-        if key not in profile or not is_valid_type(profile[key], expected_type, allow_none):
-            valid[key] = default[key]
-        else:
-            valid[key] = profile[key]
-    return valid
-
-
-async def validate_config(config: dict, user_id: int) -> dict:
-    """
-    Validates global config and all profiles.
-    """
-    valid = {}
-    default = DEFAULT_CONFIG(user_id)
-    # Top level
-    for key, (expected_type, allow_none) in CONFIG_TYPES.items():
-        if key == "PROFILES":
-            profiles = config.get("PROFILES", [])
-            # Validation of profiles
-            valid_profiles = []
-            for profile in profiles:
-                valid_profiles.append(await validate_profile(profile, user_id))
-            if not valid_profiles:
-                valid_profiles = [DEFAULT_PROFILE(user_id)]
-            valid["PROFILES"] = valid_profiles
-        elif key == "USERBOT":
-            userbot_data = config.get("USERBOT", {})
-            default_userbot = default["USERBOT"]
-            valid_userbot = {}
-            for sub_key, default_value in default_userbot.items():
-                value = userbot_data.get(sub_key, default_value)
-                valid_userbot[sub_key] = value
-            valid["USERBOT"] = valid_userbot
-        else:
-            if key not in config or not is_valid_type(config[key], expected_type, allow_none):
-                valid[key] = default[key]
-            else:
-                valid[key] = config[key]
-    return valid
-
-
-async def get_valid_config(user_id: int, path: str = CONFIG_PATH) -> dict:
-    """
-    Loads, validates and updates config.json if necessary.
-    """
-    await ensure_config(user_id, path)
-    config = await load_config(path)
-    validated = await validate_config(config, user_id)
-    # If validated version is different, save it
-    if validated != config:
-        await save_config(validated, path)
-    return validated
-
-
-async def migrate_config_if_needed(user_id: int, path: str = CONFIG_PATH):
-    """
-    Checks and converts config.json from old format (without PROFILES)
-    to new (list of profiles). Works asynchronously.
-    """
-    if not os.path.exists(path):
+    if not config:
+        logger.error("Попытка сохранения пустой конфигурации")
         return
-
-    try:
-        async with aiofiles.open(path, "r", encoding="utf-8") as f:
-            data = await f.read()
-            config = json.loads(data)
-    except Exception:
-        logger.error(f"Config {path} is corrupted.")
-        os.remove(path)
-        logger.error(f"Corrupted config {path} deleted.")
-        return
-
-    # If already new format, do nothing
-    if "PROFILES" in config:
-        return
-
-    # Form profile from old keys
-    profile_keys = [
-        "MIN_PRICE", "MAX_PRICE", "MIN_SUPPLY", "MAX_SUPPLY",
-        "COUNT", "LIMIT", "TARGET_USER_ID", "TARGET_CHAT_ID",
-        "BOUGHT", "SPENT", "DONE"
-    ]
-    profile = {}
-    for key in profile_keys:
-        if key in config:
-            profile[key] = config[key]
-
-    profile.setdefault("LIMIT", 1000000)
-    profile.setdefault("SPENT", 0)
-    profile.setdefault("BOUGHT", 0)
-    profile.setdefault("DONE", False)
-    profile.setdefault("COUNT", 5)
-
-    # Assemble new format
-    new_config = {
-        "BALANCE": config.get("BALANCE", 0),
-        "ACTIVE": config.get("ACTIVE", False),
-        "LAST_MENU_MESSAGE_ID": config.get("LAST_MENU_MESSAGE_ID"),
-        "PROFILES": [profile],
-    }
-
-    async with aiofiles.open(path, "w", encoding="utf-8") as f:
-        await f.write(json.dumps(new_config, ensure_ascii=False, indent=2))
-    logger.info(f"Config {path} migrated to new format.")
-
-
-# ------------- Working with profiles -----------------
-
-
-async def get_profile(config: dict, index: int = 0) -> dict:
-    """
-    Get profile by index (first by default).
-    """
+    
+    # Получаем user_id из первого профиля (предполагаем, что он всегда есть)
     profiles = config.get("PROFILES", [])
     if not profiles:
-        raise ValueError("No profiles in config")
-    return profiles[index]
-
-
-async def add_profile(config: dict, profile: dict, save: bool = True) -> dict:
-    """
-    Add a new profile to the config.
-    """
-    config["PROFILES"].append(profile)
-    if save:
-        await save_config(config)
-    return config
-
-
-async def update_profile(config: dict, index: int, new_profile: dict, save: bool = True) -> dict:
-    """
-    Update an existing profile by index.
-    """
-    if index >= len(config["PROFILES"]):
-        raise IndexError(f"Profile index {index} out of range")
-    config["PROFILES"][index] = new_profile
-    if save:
-        await save_config(config)
-    return config
-
-
-async def remove_profile(config: dict, index: int, user_id: int, save: bool = True) -> dict:
-    """
-    Remove a profile by index. If it's the last profile, replace it with a default one.
-    """
-    if index >= len(config["PROFILES"]):
-        raise IndexError(f"Profile index {index} out of range")
+        logger.error("Нет профилей в конфигурации")
+        return
     
-    if len(config["PROFILES"]) == 1:
-        # If it's the last profile, replace it with a default one
-        config["PROFILES"][0] = DEFAULT_PROFILE(user_id)
+    profile = profiles[0]
+    user_id = profile.get("user_id") or profile.get("TARGET_USER_ID")
+    if not user_id:
+        logger.error("Не удалось определить user_id")
+        return
+    
+    # Обновляем основные данные пользователя
+    user_data = {
+        "balance": config.get("BALANCE", 0),
+        "active": config.get("ACTIVE", False),
+        "last_menu_message_id": config.get("LAST_MENU_MESSAGE_ID")
+    }
+    
+    # Обновляем данные юзербота
+    userbot_data = config.get("USERBOT", {})
+    if userbot_data:
+        user_data.update({
+            "userbot_api_id": userbot_data.get("API_ID"),
+            "userbot_api_hash": userbot_data.get("API_HASH"),
+            "userbot_phone": userbot_data.get("PHONE"),
+            "userbot_user_id": userbot_data.get("USER_ID"),
+            "userbot_username": userbot_data.get("USERNAME"),
+            "userbot_balance": userbot_data.get("BALANCE", 0),
+            "userbot_enabled": userbot_data.get("ENABLED", False)
+        })
+    
+    # Обновляем данные пользователя в Supabase
+    await update_user_data(user_id, user_data)
+    
+    # Обновляем профили пользователя
+    # Эта часть должна быть реализована отдельно через функции работы с профилями
+    # в services/database.py, так как требует более сложной логики обновления
+    logger.info(f"Configuration saved in Supabase.")
+
+async def format_supabase_summary(user_id: int) -> str:
+    """
+    Форматирует текст меню из данных Supabase
+    """
+    # Получаем данные пользователя и профили
+    user_data = await get_user_data(user_id)
+    profiles = await get_user_profiles(user_id)
+    
+    # Получаем основные данные
+    balance = user_data.get("balance", 0)
+    active = user_data.get("active", False)
+    userbot_enabled = user_data.get("userbot_enabled", False)
+    userbot_balance = user_data.get("userbot_balance", 0)
+    
+    logger.info(f"Formatting menu for user {user_id}: balance={balance}, active={active}, userbot_enabled={userbot_enabled}, userbot_balance={userbot_balance}")
+    
+    # Формируем текст
+    status = "🟢 ACTIVE" if active else "🔴 INACTIVE"
+    header = f"<b>★ BALANCE: {balance:,}</b> {CURRENCY}\n<b>STATUS: {status}</b>\n"
+    
+    # Информация о юзерботе
+    if userbot_enabled:
+        userbot_info = f"\n<b>🤖 USERBOT:</b> ✅ ACTIVE, ★{userbot_balance:,}"
     else:
-        # Otherwise just remove it
-        config["PROFILES"].pop(index)
+        userbot_info = "\n<b>🤖 USERBOT:</b> ❌ DISABLED"
     
-    if save:
-        await save_config(config)
-    return config
-
-
-def format_config_summary(config: dict, user_id: int) -> str:
-    """
-    Formats a summary of the current configuration for display in the menu.
-    """
-    active = config.get("ACTIVE", False)
-    status = "🟢 Active" if active else "🔴 Inactive"
-    balance = config.get("BALANCE", 0)
-    
-    # Userbot info
-    userbot = config.get("USERBOT", {})
-    userbot_enabled = userbot.get("ENABLED", False)
-    userbot_balance = userbot.get("BALANCE", 0)
-    userbot_username = userbot.get("USERNAME", None)
-    
-    # Format header
-    header = f"<b>🥷 GiftsNinja</b> <code>v{VERSION}</code>\n\n"
-    header += f"<b>Status:</b> {status}\n"
-    header += f"<b>Balance:</b> {balance:,} ★\n"
-    
-    if userbot_enabled and userbot_username:
-        header += f"<b>Userbot:</b> @{userbot_username} ({userbot_balance:,} ★)\n"
-    
-    # Format profiles
-    profiles_text = "\n<b>📋 Profiles:</b>\n"
-    
-    for i, profile in enumerate(config["PROFILES"]):
-        # Skip profiles beyond the limit to avoid message length issues
-        if i >= MAX_PROFILES:
-            profiles_text += f"\n... and {len(config['PROFILES']) - MAX_PROFILES} more profiles"
-            break
-            
+    # Информация о профилях
+    profiles_info = "\n\n<b>📊 PROFILES:</b>\n"
+    for i, profile in enumerate(profiles, 1):
         target_display = get_target_display(profile, user_id)
+        done = profile.get("done", False)
+        count = profile.get("count", 0)
+        bought = profile.get("bought", 0)
+        limit = profile.get("limit", 0)
+        spent = profile.get("spent", 0)
+        sender = profile.get("sender", "bot")
         
-        name = profile.get("NAME", f"Profile {i+1}")
-        count = profile.get("COUNT", 0)
-        bought = profile.get("BOUGHT", 0)
-        spent = profile.get("SPENT", 0)
-        limit = profile.get("LIMIT", 0)
-        done = profile.get("DONE", False)
+        status_emoji = "✅" if done else "⏳"
+        sender_emoji = "👤" if sender == "bot" else "🤖"
         
-        # Price range
-        min_price = profile.get("MIN_PRICE", 0)
-        max_price = profile.get("MAX_PRICE", 0)
-        price_range = f"{min_price:,}–{max_price:,} ★"
-        
-        # Supply range
-        min_supply = profile.get("MIN_SUPPLY", 0)
-        max_supply = profile.get("MAX_SUPPLY", 0)
-        supply_range = f"{min_supply:,}–{max_supply:,}"
-        
-        # Sender type
-        sender = profile.get("SENDER", "bot")
-        sender_icon = "🤖" if sender == "bot" else "👤"
-        
-        # Status icon
-        status_icon = "✅" if done else ("🟢" if active else "🔴")
-        
-        profiles_text += (
-            f"\n{status_icon} <b>{i+1}. {name}</b>\n"
-            f"├👤 <b>Recipient:</b> {target_display}\n"
-            f"├💰 <b>Price range:</b> {price_range}\n"
-            f"├📊 <b>Supply range:</b> {supply_range}\n"
-            f"├{sender_icon} <b>Sender:</b> {sender}\n"
-            f"└🎁 <b>Progress:</b> {bought}/{count} ({spent:,}/{limit:,} ★)"
+        profiles_info += (
+            f"{i}. {status_emoji} {sender_emoji} <b>{target_display}</b>\n"
+            f"   {bought}/{count} gifts, {spent:,}/{limit:,} ★\n"
         )
     
-    return header + profiles_text
+    return header + userbot_info + profiles_info
 
+# Остальные функции, которые не используют config.json, остаются без изменений
 
+# Сохраняем функции для работы с профилями
 def get_target_display(profile: dict, user_id: int) -> str:
     """
-    Returns a formatted display of the target user/chat for the profile.
+    Возвращает строку с описанием получателя подарка
     """
-    target_user_id = profile.get("TARGET_USER_ID")
-    target_chat_id = profile.get("TARGET_CHAT_ID")
-    
+    target_user_id = profile.get("target_user_id")
+    target_chat_id = profile.get("target_chat_id")
     return get_target_display_local(target_user_id, target_chat_id, user_id)
-
 
 def get_target_display_local(target_user_id: Optional[int], target_chat_id: Optional[str], user_id: int) -> str:
     """
-    Returns a formatted display of the target user/chat.
+    Возвращает строку с описанием получателя подарка на основе ID или username
     """
-    # Self
     if target_user_id == user_id:
-        return f"yourself (ID: {target_user_id})"
+        return "yourself"
+    elif target_user_id:
+        return f"user {target_user_id}"
+    elif target_chat_id:
+        if target_chat_id.lstrip('-').isdigit():
+            return f"chat {target_chat_id}"
+        else:
+            return f"@{target_chat_id.lstrip('@')}"
+    else:
+        return "unknown"
+
+# Удаляем неиспользуемые функции load_config, ensure_config, validate_profile, validate_config,
+# migrate_config_if_needed, add_profile, update_profile, remove_profile и др.
+
+# Добавляем функции для работы с профилями, которые используются в handlers_wizard.py
+async def add_profile(config: dict, profile_data: dict):
+    """
+    Добавляет новый профиль в конфигурацию пользователя.
+    """
+    user_id = profile_data.get("user_id")
+    if not user_id:
+        logger.error("user_id не указан в данных профиля")
+        return False
     
-    # Channel/chat
-    if target_chat_id and target_chat_id.startswith("@"):
-        return f"{target_chat_id}"
-    
-    # User by ID
-    if target_user_id:
-        return f"user (ID: {target_user_id})"
-    
-    return "not specified"
+    try:
+        from services.database import add_user_profile
+        result = await add_user_profile(user_id, profile_data)
+        return result is not None
+    except Exception as e:
+        logger.error(f"Ошибка при добавлении профиля: {e}")
+        return False
+
+async def update_profile(config: dict, profile_index: int, profile_data: dict):
+    """
+    Обновляет профиль в конфигурации пользователя.
+    """
+    try:
+        from services.database import get_user_profiles, update_user_profile
+        
+        user_id = profile_data.get("user_id")
+        if not user_id:
+            logger.error("user_id не указан в данных профиля")
+            return False
+        
+        # Получаем профили пользователя
+        profiles = await get_user_profiles(user_id)
+        
+        if profile_index >= len(profiles):
+            logger.error(f"Индекс профиля {profile_index} превышает количество профилей")
+            return False
+        
+        # Получаем ID профиля для обновления
+        profile_id = profiles[profile_index].get("id")
+        if not profile_id:
+            logger.error("Не удалось получить ID профиля для обновления")
+            return False
+        
+        result = await update_user_profile(profile_id, profile_data)
+        return result is not None
+    except Exception as e:
+        logger.error(f"Ошибка при обновлении профиля: {e}")
+        return False
+
+async def remove_profile(config: dict, profile_index: int, user_id: int):
+    """
+    Удаляет профиль из конфигурации пользователя.
+    """
+    try:
+        from services.database import get_user_profiles, delete_user_profile
+        
+        # Получаем профили пользователя
+        profiles = await get_user_profiles(user_id)
+        
+        if profile_index >= len(profiles):
+            logger.error(f"Индекс профиля {profile_index} превышает количество профилей")
+            return False
+        
+        # Получаем ID профиля для удаления
+        profile_id = profiles[profile_index].get("id")
+        if not profile_id:
+            logger.error("Не удалось получить ID профиля для удаления")
+            return False
+        
+        result = await delete_user_profile(profile_id)
+        return result
+    except Exception as e:
+        logger.error(f"Ошибка при удалении профиля: {e}")
+        return False

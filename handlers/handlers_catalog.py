@@ -97,7 +97,7 @@ async def start_callback(call: CallbackQuery, state: FSMContext):
     await state.clear()
     await call.answer()
     await safe_edit_text(call.message, "🚫 Catalog closed.", reply_markup=None)
-    await refresh_balance(call.bot)
+    await refresh_balance(call.bot, call.from_user.id)
     await update_menu(
         bot=call.bot,
         chat_id=call.message.chat.id,

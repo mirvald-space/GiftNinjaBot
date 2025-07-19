@@ -15,13 +15,6 @@ from aiohttp import web
 
 # --- Internal modules ---
 from services.config import (
-    ensure_config,
-    save_config,
-    get_valid_config,
-    get_target_display,
-    migrate_config_if_needed,
-    add_allowed_user,
-    DEFAULT_CONFIG,
     VERSION,
     PURCHASE_COOLDOWN
 )
@@ -32,6 +25,7 @@ from services.gifts_manager import get_best_gift_list, userbot_gifts_updater
 from services.buy_bot import buy_gift
 from services.buy_userbot import buy_gift_userbot
 from services.userbot import try_start_userbot_from_config
+from services.config import get_target_display
 from handlers.handlers_wizard import register_wizard_handlers
 from handlers.handlers_catalog import register_catalog_handlers
 from handlers.handlers_main import register_main_handlers
@@ -57,12 +51,6 @@ WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 WEBAPP_HOST = os.getenv("WEBAPP_HOST", "0.0.0.0")
 WEBAPP_PORT = int(os.getenv("WEBAPP_PORT", "10000"))
 
-default_config = DEFAULT_CONFIG(USER_ID)
-# В публичном режиме не используем список разрешенных пользователей     
-# ALLOWED_USER_IDS = []
-# ALLOWED_USER_IDS.append(USER_ID)
-# add_allowed_user(USER_ID)
-
 setup_logging()
 logger = logging.getLogger(__name__)
 
@@ -73,20 +61,9 @@ async def gift_purchase_worker(bot):
     Now takes into account the LIMIT parameter - the maximum amount of stars that can be spent on a profile.
     If the limit is exhausted - the profile is considered completed and the worker moves to the next one.
     """
-    await refresh_balance(bot)
+    await refresh_balance(bot, USER_ID)
     while True:
         try:
-            config = await get_valid_config(USER_ID)
-
-            if not config["ACTIVE"]:
-                await asyncio.sleep(1)
-                continue
-
-            message = None
-            report_message_lines = []
-            progress_made = False  # Was there progress on profiles in this run
-            any_success = True
-
             # Получаем данные пользователя из Supabase
             user_data = await get_user_data(USER_ID)
             active = user_data.get("active", False)
@@ -98,6 +75,13 @@ async def gift_purchase_worker(bot):
                 
             # Получаем профили пользователя из Supabase
             profiles = await get_user_profiles(USER_ID)
+            
+            message = None
+            report_message_lines = []
+            progress_made = False  # Was there progress on profiles in this run
+            any_success = True
+            
+            userbot_config = user_data.get("userbot_enabled", False)
 
             for profile_index, profile in enumerate(profiles):
                 # Skip completed profiles
@@ -106,8 +90,7 @@ async def gift_purchase_worker(bot):
                 # Skip profiles with disabled userbot
                 sender = profile.get("sender", "bot")
                 if sender == "userbot":
-                    userbot_config = config.get("USERBOT", {})
-                    if not userbot_config.get("ENABLED", False):
+                    if not userbot_config:
                         continue
 
                 COUNT = profile["count"]
@@ -146,7 +129,6 @@ async def gift_purchase_worker(bot):
                                 file_id=sticker_file_id
                             )
                         elif sender == "userbot":
-                            userbot_config = config.get("USERBOT", {})
                             success = await buy_gift_userbot(
                                 session_user_id=USER_ID,
                                 gift_id=gift_id,
@@ -249,86 +231,102 @@ async def gift_purchase_worker(bot):
                 )
                 # Обновляем статус пользователя в Supabase
                 await update_user_data(USER_ID, {"active": False})
-                text = ("⚠️ Suitable gifts found, but <b>failed</b> to buy."
-                        "\n💰 Top up your balance! Check the recipient's address!"
-                        "\n🚦 Status changed to 🔴 (inactive).")
-                message = await bot.send_message(chat_id=USER_ID, text=text)
-                await update_menu(
-                    bot=bot, chat_id=USER_ID, user_id=USER_ID, message_id=message.message_id
-                )            
+                logger.warning("Status changed to inactive")
 
-            # After processing all profiles:
-            if progress_made:
-                if report_message_lines:
-                    report_text = "\n".join(report_message_lines)
-                    message = await bot.send_message(chat_id=USER_ID, text=report_text)
-                    await update_menu(
-                        bot=bot, chat_id=USER_ID, user_id=USER_ID, message_id=message.message_id
-                    )
-
-            await asyncio.sleep(5)  # Wait a bit before the next iteration
+            await asyncio.sleep(1.5)
 
         except Exception as e:
             logger.error(f"Error in gift_purchase_worker: {e}")
-            await asyncio.sleep(5)  # Wait a bit in case of error
+            await asyncio.sleep(5)
 
 
 async def main() -> None:
-    """
-    Main function for starting the bot.
-    """
-    # Load config
-    await ensure_config(USER_ID)
-    await migrate_config_if_needed(USER_ID)
+    # Remove old config file if exists - we've migrated to Supabase
+    if os.path.exists("config.json"):
+        try:
+            os.remove("config.json")
+            logger.info("Removed old config.json file as we've migrated to Supabase")
+        except Exception as e:
+            logger.error(f"Failed to remove config.json: {e}")
 
-    # Configure bot
+    # Парсим аргументы командной строки
+    webhook_mode = "--webhook" in sys.argv
+
+    # Configure the Bot
     bot = Bot(
         token=TOKEN,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+        session=await get_aiohttp_session(USER_ID)
     )
 
-    # Try to start userbot if configured
+    # Get and update the bot's balance
+    await refresh_balance(bot, USER_ID)
+
     try:
+        # Запускаем юзербот, если он есть в конфиге
         await try_start_userbot_from_config(USER_ID)
     except Exception as e:
         logger.error(f"Failed to start userbot: {e}")
 
-    # Configure dispatcher
+    # Initialize dispatcher
     dp = Dispatcher(storage=MemoryStorage())
-    dp.message.middleware(RateLimitMiddleware())
+
+    # Register middlewares
     dp.message.middleware(AccessControlMiddleware())
-    dp.callback_query.middleware(AccessControlMiddleware())
+    dp.message.middleware(RateLimitMiddleware())
 
     # Register handlers
-    register_main_handlers(dp, bot, VERSION)
     register_wizard_handlers(dp)
     register_catalog_handlers(dp)
+    register_main_handlers(dp, bot, VERSION)
 
-    # Start tasks
+    # Background tasks
     asyncio.create_task(gift_purchase_worker(bot))
     asyncio.create_task(userbot_gifts_updater(USER_ID))
 
-    # Start bot
-    if WEBHOOK_HOST:
+    # Clear webhooks
+    await bot.delete_webhook(drop_pending_updates=True)
+
+    if webhook_mode:
         # Webhook mode
-        logger.info(f"Starting bot in webhook mode: {WEBHOOK_URL}")
+        logger.info(f"Starting in webhook mode on {WEBHOOK_URL}")
+        
+        # Create aiohttp application
         app = web.Application()
-        SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=WEBHOOK_PATH)
+        
+        # Setup webhook
+        await bot.set_webhook(
+            url=WEBHOOK_URL,
+            secret_token=TOKEN
+        )
+        
+        # Process webhook calls
+        SimpleRequestHandler(
+            dispatcher=dp,
+            bot=bot,
+        ).register(app, path=WEBHOOK_PATH)
+        
+        # Setup application
         setup_application(app, dp, bot=bot)
-        await bot.set_webhook(url=WEBHOOK_URL)
-        await web._run_app(app, host=WEBAPP_HOST, port=WEBAPP_PORT)
+        
+        # Start application
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, WEBAPP_HOST, WEBAPP_PORT)
+        await site.start()
+        
+        logger.info(f"Webhook started on {WEBAPP_HOST}:{WEBAPP_PORT}")
+        
+        # Wait indefinitely
+        try:
+            await asyncio.Event().wait()
+        finally:
+            await runner.cleanup()
     else:
         # Polling mode
-        logger.info("Starting bot in polling mode")
-        await bot.delete_webhook(drop_pending_updates=True)
-        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+        logger.info("Starting in polling mode")
+        await dp.start_polling(bot)
 
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except (KeyboardInterrupt, SystemExit):
-        logger.info("Bot stopped")
-    except Exception as e:
-        logger.error(f"Unhandled error: {e}")
-        sys.exit(1)
+    asyncio.run(main())

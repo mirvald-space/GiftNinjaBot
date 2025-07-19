@@ -2,49 +2,40 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from typing import Optional
 
 # --- Internal modules ---
-from services.config import load_config, save_config, get_valid_config, format_config_summary
+from services.config import format_supabase_summary
 from services.database import get_user_data, update_user_data
 
-async def update_last_menu_message_id(message_id: int, user_id: int = None):
+async def update_last_menu_message_id(message_id: int, user_id: int):
     """
-    Saves the id of the last menu message.
+    Сохраняет id последнего сообщения с меню.
     
     Args:
-        message_id: Message ID to save
-        user_id: User ID (if None, uses the old config method)
+        message_id: ID сообщения
+        user_id: ID пользователя
     """
-    if user_id is None:
-        # Старый метод с использованием файла конфигурации
-        config = await load_config()
-        config["LAST_MENU_MESSAGE_ID"] = message_id
-        await save_config(config)
-    else:
-        # Новый метод с использованием Supabase
-        await update_user_data(user_id, {"last_menu_message_id": message_id})
+    await update_user_data(user_id, {"last_menu_message_id": message_id})
 
 
-async def get_last_menu_message_id(user_id: int = None):
+async def get_last_menu_message_id(user_id: Optional[int]):
     """
-    Returns the id of the last sent menu message.
+    Возвращает id последнего отправленного сообщения с меню.
     
     Args:
-        user_id: User ID (if None, uses the old config method)
+        user_id: ID пользователя
     """
     if user_id is None:
-        # Старый метод с использованием файла конфигурации
-        config = await load_config()
-        return config.get("LAST_MENU_MESSAGE_ID")
-    else:
-        # Новый метод с использованием Supabase
-        user_data = await get_user_data(user_id)
-        return user_data.get("last_menu_message_id")
+        return None
+        
+    user_data = await get_user_data(user_id)
+    return user_data.get("last_menu_message_id")
 
 
 def config_action_keyboard(active: bool) -> InlineKeyboardMarkup:
     """
-    Generates inline keyboard for menu with actions.
+    Генерирует inline-клавиатуру для меню с действиями.
     """
     toggle_text = "🔴 Disable" if active else "🟢 Enable"
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -69,30 +60,32 @@ def config_action_keyboard(active: bool) -> InlineKeyboardMarkup:
 
 async def update_menu(bot, chat_id: int, user_id: int, message_id: int):
     """
-    Updates the menu in the chat: deletes the previous one and sends a new one.
+    Обновляет меню в чате: удаляет предыдущее и отправляет новое.
     """
     # Получаем данные пользователя из Supabase
     user_data = await get_user_data(user_id)
     active = user_data.get("active", False)
     
-    # Для отображения используем старый метод
-    config = await get_valid_config(user_id)
-    config["ACTIVE"] = active
+    # Формируем текст меню из данных Supabase
+    menu_text = await format_supabase_summary(user_id)
     
-    await delete_menu(bot=bot, chat_id=chat_id, current_message_id=message_id, user_id=user_id)
-    await send_menu(bot=bot, chat_id=chat_id, config=config, text=format_config_summary(config, user_id), user_id=user_id)
+    await delete_menu(bot=bot, chat_id=chat_id, user_id=user_id, current_message_id=message_id)
+    await send_menu(bot=bot, chat_id=chat_id, text=menu_text, active=active, user_id=user_id)
 
 
-async def delete_menu(bot, chat_id: int, current_message_id: int = None, user_id: int = None):
+async def delete_menu(bot, chat_id: int, user_id: int = None, current_message_id: int = None):
     """
-    Deletes the last menu message if it differs from the current one.
+    Удаляет последнее сообщение с меню, если оно отличается от текущего.
     
     Args:
-        bot: Bot instance
-        chat_id: Chat ID
-        current_message_id: Current message ID
-        user_id: User ID (if None, uses the old config method)
+        bot: Экземпляр бота
+        chat_id: ID чата
+        user_id: ID пользователя (опционально)
+        current_message_id: ID текущего сообщения (опционально)
     """
+    if user_id is None:
+        return
+        
     last_menu_message_id = await get_last_menu_message_id(user_id)
     if last_menu_message_id and last_menu_message_id != current_message_id:
         try:
@@ -110,21 +103,21 @@ async def delete_menu(bot, chat_id: int, current_message_id: int = None, user_id
                 raise
 
 
-async def send_menu(bot, chat_id: int, config: dict, text: str, user_id: int = None) -> int:
+async def send_menu(bot, chat_id: int, text: str, active: bool, user_id: int) -> int:
     """
-    Sends a new menu to the chat and updates the id of the last message.
+    Отправляет новое меню в чат и обновляет id последнего сообщения.
     
     Args:
-        bot: Bot instance
-        chat_id: Chat ID
-        config: Configuration
-        text: Menu text
-        user_id: User ID (if None, uses the old config method)
+        bot: Экземпляр бота
+        chat_id: ID чата
+        text: Текст меню
+        active: Статус активности
+        user_id: ID пользователя
     """
     sent = await bot.send_message(
         chat_id=chat_id,
         text=text,
-        reply_markup=config_action_keyboard(config.get("ACTIVE"))
+        reply_markup=config_action_keyboard(active)
     )
     await update_last_menu_message_id(sent.message_id, user_id)
     return sent.message_id
@@ -132,7 +125,7 @@ async def send_menu(bot, chat_id: int, config: dict, text: str, user_id: int = N
 
 def payment_keyboard(amount):
     """
-    Generates inline keyboard with payment button for invoice.
+    Генерирует inline-клавиатуру с кнопкой оплаты для инвойса.
     """
     builder = InlineKeyboardBuilder()
     builder.button(text=f"Top up ★{amount:,}", pay=True)

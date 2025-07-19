@@ -3,9 +3,8 @@ from itertools import combinations
 import logging
 
 # --- Internal modules ---
-from services.config import load_config, save_config
+from services.database import get_user_balance, update_user_balance, get_user_userbot_balance, update_user_userbot_balance, update_user_data
 from services.userbot import get_userbot_stars_balance
-from services.database import get_user_balance, update_user_balance, get_user_userbot_balance, update_user_userbot_balance
 
 # --- Third-party libraries ---
 from aiogram.types.star_amount import StarAmount
@@ -16,10 +15,14 @@ async def get_stars_balance(bot) -> int:
     """
     Gets the star balance through the bot API (current method).
     """
-    star_amount: StarAmount = await bot.get_my_star_balance()
-    balance = star_amount.amount
-
-    return balance
+    try:
+        star_amount: StarAmount = await bot.get_my_star_balance()
+        balance = star_amount.amount
+        logger.info(f"Retrieved bot balance: {balance} stars")
+        return balance
+    except Exception as e:
+        logger.error(f"Failed to get bot balance: {e}")
+        return 0
 
 
 async def get_stars_balance_by_transactions(bot) -> int:
@@ -50,107 +53,57 @@ async def get_stars_balance_by_transactions(bot) -> int:
     return balance
 
 
-async def refresh_balance(bot, user_id=None) -> int:
+async def refresh_balance(bot, user_id) -> int:
     """
     Updates and saves the star balance, returns the current value.
     
     Args:
         bot: Bot instance
-        user_id: User ID (if None, uses the old config method)
+        user_id: User ID
     """
-    if user_id is None:
-        # Старый метод с использованием файла конфигурации
-        # Load config
-        config = await load_config()
-        userbot_data = config.get("USERBOT", {})
-
-        # Userbot balance (if session exists)
-        has_session = (
-            userbot_data.get("API_ID")
-            and userbot_data.get("API_HASH")
-            and userbot_data.get("PHONE")
-        )
-        if has_session:
-            try:
-                userbot_balance = await get_userbot_balance()
-                config["USERBOT"]["BALANCE"] = userbot_balance
-            except Exception as e:
-                config["USERBOT"]["BALANCE"] = 0
-                logger.error(f"Failed to get userbot balance: {e}")
-        else:
-            logger.info("Userbot session is inactive or not configured.")
-            config["USERBOT"]["BALANCE"] = 0
-
-        # Main bot balance
+    try:
+        # Получаем баланс бота
         balance = await get_stars_balance(bot)
-        config["BALANCE"] = balance
-
-        # Save everything
-        await save_config(config)
-        return balance
-    else:
-        # Новый метод с использованием Supabase
+        logger.info(f"Refreshing balance for user {user_id}: {balance} stars")
+        
+        # Обновляем баланс пользователя напрямую
+        await update_user_data(user_id, {"balance": balance})
+        logger.info(f"Updated user {user_id} balance in database: {balance} stars")
+        
+        # Обновляем баланс юзербота (если есть)
         try:
-            # Получаем баланс бота
-            balance = await get_stars_balance(bot)
-            
-            # Обновляем баланс пользователя
-            await update_user_balance(user_id, balance - await get_user_balance(user_id))
-            
-            # Обновляем баланс юзербота (если есть)
-            try:
-                userbot_balance = await get_userbot_balance()
-                await update_user_userbot_balance(user_id, userbot_balance - await get_user_userbot_balance(user_id))
-            except Exception as e:
-                logger.error(f"Failed to get userbot balance for user {user_id}: {e}")
-            
-            return balance
+            userbot_balance = await get_userbot_stars_balance()
+            await update_user_data(user_id, {"userbot_balance": userbot_balance})
+            logger.info(f"Updated userbot balance for user {user_id}: {userbot_balance} stars")
         except Exception as e:
-            logger.error(f"Failed to refresh balance for user {user_id}: {e}")
-            return 0
+            logger.error(f"Failed to get userbot balance for user {user_id}: {e}")
+        
+        return balance
+    except Exception as e:
+        logger.error(f"Failed to refresh balance for user {user_id}: {e}")
+        return 0
 
 
-async def change_balance(delta: int, user_id=None) -> int:
+async def change_balance(delta: int, user_id) -> int:
     """
     Changes the star balance by the specified delta value, not allowing negative values.
     
     Args:
         delta: Change in balance
-        user_id: User ID (if None, uses the old config method)
+        user_id: User ID
     """
-    if user_id is None:
-        # Старый метод с использованием файла конфигурации
-        config = await load_config()
-        config["BALANCE"] = max(0, config.get("BALANCE", 0) + delta)
-        balance = config["BALANCE"]
-        await save_config(config)
-        return balance
-    else:
-        # Новый метод с использованием Supabase
-        return await update_user_balance(user_id, delta)
+    return await update_user_balance(user_id, delta)
 
 
-async def change_balance_userbot(delta: int, user_id=None) -> int:
+async def change_balance_userbot(delta: int, user_id) -> int:
     """
     Changes the userbot's star balance by the specified delta value, not allowing negative values.
     
     Args:
         delta: Change in balance
-        user_id: User ID (if None, uses the old config method)
+        user_id: User ID
     """
-    if user_id is None:
-        # Старый метод с использованием файла конфигурации
-        config = await load_config()
-        userbot = config.get("USERBOT", {})
-        current = userbot.get("BALANCE", 0)
-        new_balance = max(0, current + delta)
-
-        config["USERBOT"]["BALANCE"] = new_balance
-        await save_config(config)
-        return new_balance
-    else:
-        # Новый метод с использованием Supabase
-        return await update_user_userbot_balance(user_id, delta)
+    return await update_user_userbot_balance(user_id, delta)
 
 
 async def refund_all_star_payments(bot, username, user_id, message_func=None):
@@ -250,15 +203,15 @@ async def refund_all_star_payments(bot, username, user_id, message_func=None):
 
     return {
         "refunded": total_refunded,
-        "count": len(refund_ids),
+        "count": len(best_combo),
         "txn_ids": refund_ids,
         "left": left,
-        "next_deposit": next_possible
+        "next_possible": next_possible
     }
 
 
 async def get_userbot_balance() -> int:
     """
-    Gets the star balance from the userbot session.
+    Получает баланс stars юзербота.
     """
     return await get_userbot_stars_balance()

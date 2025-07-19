@@ -1,6 +1,7 @@
+from typing import Optional
 from aiogram.client.session.aiohttp import AiohttpSession
 
-async def get_proxy_data(user_id: int) -> dict | None:
+async def get_proxy_data(user_id: int) -> Optional[dict]:
     """
     Returns proxy connection data for the specified user.
 
@@ -16,7 +17,7 @@ async def get_proxy_data(user_id: int) -> dict | None:
     proxy = None
     return proxy
 
-async def get_aiohttp_session(user_id: int) -> AiohttpSession | None:
+async def get_aiohttp_session(user_id: int) -> Optional[AiohttpSession]:
     """
     Creates an aiohttp session with proxy for the specified user.
     """
@@ -28,7 +29,7 @@ async def get_aiohttp_session(user_id: int) -> AiohttpSession | None:
     else:
         return None
     
-async def get_userbot_proxy(user_id: int) -> dict | None:
+async def get_userbot_proxy(user_id: int) -> Optional[dict]:
     """
     Forms a dictionary of proxy settings for userbot connection.
     """

@@ -6,7 +6,7 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 
 # --- Internal modules ---
-from services.config import get_valid_config, save_config, format_config_summary, get_target_display
+from services.config import format_supabase_summary, get_target_display
 from services.database import get_user_data, update_user_data, get_user_profiles
 from services.menu import update_menu, config_action_keyboard 
 from services.balance import refresh_balance
@@ -97,7 +97,7 @@ def register_main_handlers(dp, bot: Bot, version):
             [InlineKeyboardButton(text="☰ Menu", callback_data="main_menu")]
         ])
         await call.answer()
-        await call.message.answer(help_text, reply_markup=button)
+        await call.message.answer(help_text, reply_markup=button, disable_web_page_preview=True)
 
     
     @dp.callback_query(F.data == "show_userbot_help")
@@ -178,7 +178,6 @@ def register_main_handlers(dp, bot: Bot, version):
         user_id = call.from_user.id
         
         # Получаем данные пользователя и его профили из Supabase
-        user_data = await get_user_data(user_id)
         profiles = await get_user_profiles(user_id)
         
         # Сбрасываем счетчики во всех профилях
@@ -186,21 +185,16 @@ def register_main_handlers(dp, bot: Bot, version):
             profile["bought"] = 0
             profile["spent"] = 0
             profile["done"] = False
-            # Обновляем профиль в базе данных
-            await update_user_data(user_id, {"profiles": profiles})
         
-        # Устанавливаем статус неактивный
-        await update_user_data(user_id, {"active": False})
+        # Обновляем профили и устанавливаем статус неактивный
+        await update_user_data(user_id, {"profiles": profiles, "active": False})
         
-        # Используем старый метод для отображения информации
-        config = await get_valid_config(user_id)
-        config["ACTIVE"] = False
-        await save_config(config)
-        info = format_config_summary(config, user_id)
+        # Получаем данные для отображения меню
+        menu_text = await format_supabase_summary(user_id)
         
         try:
             await call.message.edit_text(
-                info,
+                menu_text,
                 reply_markup=config_action_keyboard(False)
             )
         except TelegramBadRequest as e:
@@ -223,14 +217,11 @@ def register_main_handlers(dp, bot: Bot, version):
         new_active = not user_data.get("active", False)
         await update_user_data(user_id, {"active": new_active})
         
-        # Используем старый метод для отображения информации
-        config = await get_valid_config(user_id)
-        config["ACTIVE"] = new_active
-        await save_config(config)
-        info = format_config_summary(config, user_id)
+        # Получаем текст меню из Supabase
+        menu_text = await format_supabase_summary(user_id)
         
         await call.message.edit_text(
-            info,
+            menu_text,
             reply_markup=config_action_keyboard(new_active)
         )
         await call.answer("Status updated")

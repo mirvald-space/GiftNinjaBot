@@ -413,7 +413,7 @@ async def userbot_main_menu_callback(call: CallbackQuery, state: FSMContext):
     await state.clear()
     await call.answer()
     await safe_edit_text(call.message, "✅ Userbot configuration completed.", reply_markup=None)
-    await refresh_balance(call.bot)
+    await refresh_balance(call.bot, call.from_user.id)
     await update_menu(
         bot=call.bot,
         chat_id=call.message.chat.id,
@@ -433,7 +433,7 @@ async def profiles_menu(message: Message, user_id: int):
     # Form profile keyboard
     keyboard = []
     for idx, profile in enumerate(profiles):
-        profile_name = f'Profile {idx + 1}' if  not profile['NAME'] else profile['NAME']
+        profile_name = f'Profile {idx + 1}' if  not profile.get('name') else profile['name']
         btns = [
             InlineKeyboardButton(
                 text=f"✏️ {profile_name}", callback_data=f"profile_edit_{idx}"
@@ -454,8 +454,8 @@ async def profiles_menu(message: Message, user_id: int):
     lines = []
     for idx, profile in enumerate(profiles, 1):
         target_display = get_target_display(profile, user_id)
-        profile_name = f'Profile {idx}' if  not profile['NAME'] else profile['NAME']
-        sender = '<code>Bot</code>' if profile['SENDER'] == 'bot' else '<code>Userbot</code>'
+        profile_name = f'Profile {idx}' if  not profile.get('name') else profile['name']
+        sender = '<code>Bot</code>' if profile.get('sender') == 'bot' else '<code>Userbot</code>'
         if idx == 1 and len(profiles) == 1: line = (f"🏷️ <b>{profile_name} {sender}</b> → {target_display}")
         elif idx == 1: line = (f"┌🏷️ <b>{profile_name} {sender}</b> → {target_display}")
         elif len(profiles) == idx: line = (f"└🏷️ <b>{profile_name} {sender}</b> → {target_display}")
@@ -487,13 +487,13 @@ def profile_text(profile, idx, user_id):
     Used for displaying information when editing a profile.
     """
     target_display = get_target_display(profile, user_id)
-    profile_name = f'Profile {idx + 1}' if  not profile['NAME'] else profile['NAME']
-    sender = '<code>Bot</code>' if profile['SENDER'] == 'bot' else '<code>Userbot</code>'
+    profile_name = f'Profile {idx + 1}' if  not profile.get('name') else profile['name']
+    sender = '<code>Bot</code>' if profile.get('sender') == 'bot' else '<code>Userbot</code>'
     return (f"✏️ <b>Editing {profile_name}</b>:\n\n"
-            f"┌💰 <b>Price</b>: {profile.get('MIN_PRICE'):,} – {profile.get('MAX_PRICE'):,} ★\n"
-            f"├📦 <b>Supply</b>: {profile.get('MIN_SUPPLY'):,} – {profile.get('MAX_SUPPLY'):,}\n"
-            f"├🎁 <b>Bought</b>: {profile.get('BOUGHT'):,} / {profile.get('COUNT'):,}\n"
-            f"├⭐️ <b>Limit</b>: {profile.get('SPENT'):,} / {profile.get('LIMIT'):,} ★\n"
+            f"┌💰 <b>Price</b>: {profile.get('min_price', 0):,} – {profile.get('max_price', 0):,} ★\n"
+            f"├📦 <b>Supply</b>: {profile.get('min_supply', 0):,} – {profile.get('max_supply', 0):,}\n"
+            f"├🎁 <b>Bought</b>: {profile.get('bought', 0):,} / {profile.get('count', 0):,}\n"
+            f"├⭐️ <b>Limit</b>: {profile.get('spent', 0):,} / {profile.get('limit', 0):,} ★\n"
             f"├👤 <b>Recipient</b>: {target_display}\n"
             f"└📤 <b>Sender</b>: {sender}")
 
@@ -579,7 +579,7 @@ async def on_profile_name_entered(message: Message, state: FSMContext):
         await state.clear()
         return
 
-    profiles[idx]["NAME"] = name
+    profiles[idx]["name"] = name
     await save_config(config)
     await message.answer(f"✅ Profile name successfully changed to: <b>{name}</b>")
 
@@ -600,7 +600,7 @@ async def edit_profile_min_price(call: CallbackQuery, state: FSMContext):
     config = await get_valid_config(call.from_user.id)
     profiles = config.get("PROFILES", [])
     profile = profiles[idx]
-    profile_name = f'profile {idx+1}' if  not profile['NAME'] else profile['NAME']
+    profile_name = f'profile {idx+1}' if  not profile.get('name') else profile.get('name')
     await call.message.answer(f"✏️ <b>Editing {profile_name}:</b>\n\n"
                               "💰 Minimum gift price, for example: <code>5000</code>\n\n"
                               "/cancel — cancel")
@@ -620,7 +620,7 @@ async def edit_profile_min_supply(call: CallbackQuery, state: FSMContext):
     config = await get_valid_config(call.from_user.id)
     profiles = config.get("PROFILES", [])
     profile = profiles[idx]
-    profile_name = f'profile {idx+1}' if  not profile['NAME'] else profile['NAME']
+    profile_name = f'profile {idx+1}' if  not profile.get('name') else profile.get('name')
     await call.message.answer(f"✏️ <b>Editing {profile_name}:</b>\n\n"
                               "📦 Minimum supply for gift, for example: <code>1000</code>\n\n"
                               "/cancel — cancel")
@@ -640,7 +640,7 @@ async def edit_profile_limit(call: CallbackQuery, state: FSMContext):
     config = await get_valid_config(call.from_user.id)
     profiles = config.get("PROFILES", [])
     profile = profiles[idx]
-    profile_name = f'profile {idx+1}' if  not profile['NAME'] else profile['NAME']
+    profile_name = f'profile {idx+1}' if  not profile.get('name') else profile.get('name')
     await call.message.answer(f"✏️ <b>Editing {profile_name}:</b>\n\n"
                               "⭐️ Enter the number of stars for this profile (for example: <code>10000</code>)\n\n"
                               "/cancel — cancel")
@@ -660,7 +660,7 @@ async def edit_profile_count(call: CallbackQuery, state: FSMContext):
     config = await get_valid_config(call.from_user.id)
     profiles = config.get("PROFILES", [])
     profile = profiles[idx]
-    profile_name = f'profile {idx+1}' if  not profile['NAME'] else profile['NAME']
+    profile_name = f'profile {idx+1}' if  not profile.get('name') else profile.get('name')
     await call.message.answer(f"✏️ <b>Editing {profile_name}:</b>\n\n"
                               "🎁 Maximum number of gifts, for example: <code>5</code>\n\n"
                               "/cancel — cancel")
@@ -680,7 +680,7 @@ async def edit_profile_target(call: CallbackQuery, state: FSMContext):
     config = await get_valid_config(call.from_user.id)
     profiles = config.get("PROFILES", [])
     profile = profiles[idx]
-    profile_name = f'profile {idx+1}' if  not profile['NAME'] else profile['NAME']
+    profile_name = f'profile {idx+1}' if  not profile.get('name') else profile.get('name')
     message_text = (f"✏️ <b>Editing {profile_name}:</b>\n\n"
                     "📥 Enter <b>recipient</b> of the gift:\n\n"
                     "🤖 If <b>sender</b> <code>Bot</code> enter:\n"
@@ -726,7 +726,7 @@ async def edit_profile_sender(call: CallbackQuery, state: FSMContext):
     await state.set_state(ConfigWizard.edit_gift_sender)
     await state.update_data(profile_data=profile, profile_index=idx)
 
-    profile_name = f'profile {idx+1}' if  not profile['NAME'] else profile['NAME']
+    profile_name = f'profile {idx+1}' if  not profile.get('name') else profile.get('name')
     await call.message.edit_text(f"✏️ <b>Editing {profile_name}:</b>\n\n"
                                  "�� Select <b>sender</b> of gifts:\n\n"
                                  "🤖 <code>Bot</code> - purchases from bot balance\n"
@@ -777,7 +777,7 @@ async def edit_profiles_menu(call: CallbackQuery):
     config = await get_valid_config(call.from_user.id)
     profiles = config.get("PROFILES", [])
     profile = profiles[idx]
-    profile_name = f'profile {idx+1}' if  not profile['NAME'] else profile['NAME']
+    profile_name = f'profile {idx+1}' if  not profile.get('name') else profile.get('name')
     await safe_edit_text(call.message, f"✅ Editing <b>{profile_name}</b> completed.", reply_markup=None)
     await profiles_menu(call.message, call.from_user.id)
     await call.answer()
@@ -807,7 +807,7 @@ async def step_edit_min_price(message: Message, state: FSMContext):
         config = await get_valid_config(message.from_user.id)
         profiles = config.get("PROFILES", [])
         profile = profiles[idx]
-        profile_name = f'profile {idx+1}' if  not profile['NAME'] else profile['NAME']
+        profile_name = f'profile {idx+1}' if  not profile.get('name') else profile.get('name')
         await message.answer(f"✏️ <b>Editing {profile_name}:</b>\n\n"
                              "💰 Maximum gift price, for example: <code>10000</code>\n\n"
                              "/cancel — cancel")
@@ -886,7 +886,7 @@ async def step_edit_min_supply(message: Message, state: FSMContext):
         config = await get_valid_config(message.from_user.id)
         profiles = config.get("PROFILES", [])
         profile = profiles[idx]
-        profile_name = f'profile {idx+1}' if  not profile['NAME'] else profile['NAME']
+        profile_name = f'profile {idx+1}' if  not profile.get('name') else profile.get('name')
         await message.answer(f"✏️ <b>Editing {profile_name}:</b>\n\n"
                              "📦 Maximum supply for gift, for example: <code>10000</code>\n\n"
                              "/cancel — cancel")
@@ -1214,7 +1214,7 @@ async def profiles_main_menu_callback(call: CallbackQuery, state: FSMContext):
     await state.clear()
     await call.answer()
     await safe_edit_text(call.message, "✅ Profile editing completed.", reply_markup=None)
-    await refresh_balance(call.bot)
+    await refresh_balance(call.bot, call.from_user.id)
     await update_menu(
         bot=call.bot,
         chat_id=call.message.chat.id,
@@ -1241,7 +1241,7 @@ async def on_profile_delete_confirm(call: CallbackQuery, state: FSMContext):
     profiles = config.get("PROFILES", [])
     profile = profiles[idx]
     target_display = get_target_display(profile, call.from_user.id)
-    profile_name = f'Profile {idx + 1}' if  not profile['NAME'] else profile['NAME']
+    profile_name = f'Profile {idx + 1}' if  not profile.get('name') else profile.get('name')
     message = (f"┌🏷️ <b>{profile_name}</b> (bought {profile.get('BOUGHT'):,} from {profile.get('COUNT'):,})\n"
             f"├💰 <b>Price</b>: {profile.get('MIN_PRICE'):,} – {profile.get('MAX_PRICE'):,} ★\n"
             f"├📦 <b>Supply</b>: {profile.get('MIN_SUPPLY'):,} – {profile.get('MAX_SUPPLY'):,}\n"
@@ -1669,7 +1669,7 @@ async def withdraw_all_confirmed(call: CallbackQuery):
     else:
         await call.message.answer("🚫 No stars found for refund.")
 
-    balance = await refresh_balance(call.bot)
+    balance = await refresh_balance(call.bot, call.from_user.id)
     await update_menu(bot=call.bot, chat_id=call.message.chat.id, user_id=call.from_user.id, message_id=call.message.message_id)
 
 
