@@ -178,9 +178,10 @@ async def userbot_enable_handler(call: CallbackQuery):
     username = call.from_user.username
     bot_user = await call.bot.get_me()
     bot_username = bot_user.username
-    config = await get_valid_config(user_id)
-    config["USERBOT"]["ENABLED"] = True
-    await save_config(config)
+    
+    # Обновляем статус юзербота в таблице userbots
+    from services.database import update_user_userbot_data
+    await update_user_userbot_data(user_id, {"enabled": True})
 
     await call.answer()
 
@@ -209,9 +210,10 @@ async def userbot_disable_handler(call: CallbackQuery):
     username = call.from_user.username
     bot_user = await call.bot.get_me()
     bot_username = bot_user.username
-    config = await get_valid_config(user_id)
-    config["USERBOT"]["ENABLED"] = False
-    await save_config(config)
+    
+    # Обновляем статус юзербота в таблице userbots
+    from services.database import update_user_userbot_data
+    await update_user_userbot_data(user_id, {"enabled": False})
 
     await call.answer()
 

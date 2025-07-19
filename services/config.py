@@ -131,10 +131,14 @@ async def format_supabase_summary(user_id: int) -> str:
     user_data = await get_user_data(user_id)
     profiles = await get_user_profiles(user_id)
     
+    # Получаем данные юзербота из отдельной таблицы
+    from services.database import get_user_userbot_data
+    userbot_data = await get_user_userbot_data(user_id)
+    
     # Получаем основные данные
     balance = user_data.get("balance", 0)
     active = user_data.get("active", False)
-    userbot_enabled = user_data.get("userbot_enabled", False)
+    userbot_enabled = userbot_data.get("enabled", False) if userbot_data else False
     userbot_balance = user_data.get("userbot_balance", 0)
     
     logger.info(f"Formatting menu for user {user_id}: balance={balance}, active={active}, userbot_enabled={userbot_enabled}, userbot_balance={userbot_balance}")

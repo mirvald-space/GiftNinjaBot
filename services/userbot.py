@@ -130,17 +130,19 @@ async def _clear_userbot_config(user_id: int):
     """
     Resets USERBOT fields in the config.
     """
-    config = await get_valid_config(user_id)
-    config["USERBOT"] = {
-        "API_ID": None,
-        "API_HASH": None,
-        "PHONE": None,
-        "USER_ID": None,
-        "USERNAME": None,
-        "ENABLED": False
-    }
-    await save_config(config)
-    logger.info("Data in config cleared.")
+    try:
+        from services.database import update_user_userbot_data
+        # Очищаем данные юзербота в таблице userbots
+        await update_user_userbot_data(user_id, {
+            "api_id": None,
+            "api_hash": None,
+            "phone": None,
+            "username": None,
+            "enabled": False
+        })
+        logger.info("Data in config cleared.")
+    except Exception as e:
+        logger.error(f"Failed to clear userbot config: {e}")
 
 
 async def create_userbot_client(user_id: int, session_name: str, api_id: int, api_hash: str, phone: str, sessions_dir: str, proxy: str) -> Client:
@@ -283,14 +285,16 @@ async def continue_userbot_signin(message, state):
         }
 
         # Save data
-        config = await get_valid_config(user_id)
-        config["USERBOT"]["API_ID"] = api_id
-        config["USERBOT"]["API_HASH"] = api_hash
-        config["USERBOT"]["PHONE"] = phone
-        config["USERBOT"]["USER_ID"] = me.id
-        config["USERBOT"]["USERNAME"] = me.username
-        config["USERBOT"]["ENABLED"] = True
-        await save_config(config)
+        from services.database import update_user_userbot_data
+        userbot_data = {
+            "api_id": api_id,
+            "api_hash": api_hash,
+            "phone": phone,
+            "user_id": me.id,
+            "username": me.username,
+            "enabled": True
+        }
+        await update_user_userbot_data(user_id, userbot_data)
         
         return True, False, False  # Success, password not needed, no retry
     except PhoneCodeInvalid:
@@ -360,14 +364,16 @@ async def finish_userbot_signin(message, state):
         }
 
         # Save data
-        config = await get_valid_config(user_id)
-        config["USERBOT"]["API_ID"] = api_id
-        config["USERBOT"]["API_HASH"] = api_hash
-        config["USERBOT"]["PHONE"] = phone
-        config["USERBOT"]["USER_ID"] = me.id
-        config["USERBOT"]["USERNAME"] = me.username
-        config["USERBOT"]["ENABLED"] = True
-        await save_config(config)
+        from services.database import update_user_userbot_data
+        userbot_data = {
+            "api_id": api_id,
+            "api_hash": api_hash,
+            "phone": phone,
+            "user_id": me.id,
+            "username": me.username,
+            "enabled": True
+        }
+        await update_user_userbot_data(user_id, userbot_data)
         return True, False
     except PasswordHashInvalid:
         attempts += 1

@@ -76,13 +76,16 @@ async def gift_purchase_worker(bot):
             # Получаем профили пользователя из Supabase
             profiles = await get_user_profiles(USER_ID)
             
+            # Получаем данные юзербота из отдельной таблицы
+            from services.database import get_user_userbot_data
+            userbot_data = await get_user_userbot_data(USER_ID)
+            userbot_enabled = userbot_data.get("enabled", False) if userbot_data else False
+            
             message = None
             report_message_lines = []
             progress_made = False  # Was there progress on profiles in this run
             any_success = True
             
-            userbot_config = user_data.get("userbot_enabled", False)
-
             for profile_index, profile in enumerate(profiles):
                 # Skip completed profiles
                 if profile.get("done"):
@@ -90,7 +93,7 @@ async def gift_purchase_worker(bot):
                 # Skip profiles with disabled userbot
                 sender = profile.get("sender", "bot")
                 if sender == "userbot":
-                    if not userbot_config:
+                    if not userbot_enabled:
                         continue
 
                 COUNT = profile["count"]
