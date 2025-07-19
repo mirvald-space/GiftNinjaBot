@@ -1,7 +1,7 @@
 {
   "BALANCE": 7,
   "ACTIVE": true,
-  "LAST_MENU_MESSAGE_ID": 874,
+  "LAST_MENU_MESSAGE_ID": 877,
   "PROFILES": [
     {
       "NAME": null,
@@ -26,7 +26,7 @@
     "PHONE": null,
     "USER_ID": null,
     "USERNAME": null,
-    "BALANCE": 0,
-    "ENABLED": false
+    "ENABLED": false,
+    "BALANCE": 0
   }
 }

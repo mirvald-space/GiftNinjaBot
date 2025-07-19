@@ -10,6 +10,8 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+from aiohttp import web
 
 # --- Internal modules ---
 from services.config import (
@@ -38,8 +40,22 @@ from middlewares.access_control import AccessControlMiddleware
 from middlewares.rate_limit import RateLimitMiddleware
 
 load_dotenv(override=False)
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-USER_ID = int(os.getenv("TELEGRAM_USER_ID"))
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+if not TOKEN:
+    raise ValueError("TELEGRAM_BOT_TOKEN is not set in .env file")
+    
+USER_ID = int(os.getenv("TELEGRAM_USER_ID", "0"))
+if USER_ID == 0:
+    raise ValueError("TELEGRAM_USER_ID is not set in .env file")
+    
+# Webhook settings
+WEBHOOK_HOST = os.getenv("WEBHOOK_HOST", "")  # Domain or public IP
+WEBHOOK_PATH = os.getenv("WEBHOOK_PATH", "/webhook")
+WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
+# Webserver settings
+WEBAPP_HOST = os.getenv("WEBAPP_HOST", "0.0.0.0")
+WEBAPP_PORT = int(os.getenv("WEBAPP_PORT", "10000"))
+
 default_config = DEFAULT_CONFIG(USER_ID)
 ALLOWED_USER_IDS = []
 ALLOWED_USER_IDS.append(USER_ID)
@@ -257,7 +273,7 @@ async def gift_purchase_worker(bot):
 
 async def main() -> None:
     """
-    Main function that initializes the bot, dispatcher, and starts polling.
+    Main function that initializes the bot, dispatcher, and starts webhook server.
     """
     logger.info("Bot started!")
     await migrate_config_if_needed(USER_ID)
@@ -292,8 +308,48 @@ async def main() -> None:
     purchase_task = asyncio.create_task(gift_purchase_worker(bot))
     userbot_updater_task = asyncio.create_task(userbot_gifts_updater(USER_ID))
 
-    # Start polling
-    await dp.start_polling(bot)
+    # Set up webhook
+    # Remove webhook first to ensure we don't have any previous webhook set
+    await bot.delete_webhook()
+    
+    if WEBHOOK_HOST:
+        # Set up webhook only if WEBHOOK_HOST is provided
+        await bot.set_webhook(url=WEBHOOK_URL)
+        logger.info(f"Webhook set to: {WEBHOOK_URL}")
+        
+        # Create aiohttp application
+        app = web.Application()
+        
+        # Setup webhook handler
+        webhook_handler = SimpleRequestHandler(
+            dispatcher=dp,
+            bot=bot,
+        )
+        webhook_handler.register(app, path=WEBHOOK_PATH)
+        
+        # Setup application
+        setup_application(app, dp, bot=bot)
+        
+        # Start web server
+        logger.info(f"Starting webhook server on {WEBAPP_HOST}:{WEBAPP_PORT}")
+        
+        # Вместо web.run_app, который запускает свой цикл событий
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, host=WEBAPP_HOST, port=WEBAPP_PORT)
+        await site.start()
+        
+        # Бесконечный цикл для поддержания работы приложения
+        try:
+            # Ждем бесконечно или до отмены
+            await asyncio.Event().wait()
+        finally:
+            # Корректное завершение при выходе
+            await runner.cleanup()
+    else:
+        # Fallback to polling if WEBHOOK_HOST is not set
+        logger.warning("WEBHOOK_HOST not set, falling back to polling")
+        await dp.start_polling(bot)
 
 
 if __name__ == "__main__":

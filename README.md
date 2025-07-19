@@ -43,6 +43,12 @@ pip install -r requirements.txt
 ```env
 TELEGRAM_BOT_TOKEN="тут_ваш_токен_бота"
 TELEGRAM_USER_ID="ваш_telegram_id"
+
+# Налаштування для вебхуків (опціонально)
+# WEBHOOK_HOST="https://ваш-домен.com"  # Ваш домен або публічна IP-адреса з https://
+# WEBHOOK_PATH="/webhook"  # Шлях для вебхука (за замовчуванням: /webhook)
+# WEBAPP_HOST="0.0.0.0"  # Хост для веб-сервера (за замовчуванням: 0.0.0.0)
+# WEBAPP_PORT=10000  # Порт для веб-сервера (за замовчуванням: 10000)
 ```
 
 > Де взяти токен: [@BotFather](https://t.me/BotFather).
@@ -53,6 +59,14 @@ TELEGRAM_USER_ID="ваш_telegram_id"
 ```bash
 python main.py
 ```
+
+### Використання вебхуків
+
+Для запуску бота з вебхуками, вам потрібно:
+1. Мати домен з SSL-сертифікатом або публічну IP-адресу
+2. Розкоментувати та налаштувати параметри WEBHOOK_* у файлі `.env`
+3. Переконатися, що порт відкритий у вашому фаєрволі
+4. Запустити бота: `python main.py`
 
 ---
 
@@ -137,6 +151,12 @@ pip install -r requirements.txt
 ```env
 TELEGRAM_BOT_TOKEN="тут_ваш_токен_бота"
 TELEGRAM_USER_ID="ваш_telegram_id"
+
+# Настройки для вебхуков (опционально)
+# WEBHOOK_HOST="https://ваш-домен.com"  # Ваш домен или публичный IP-адрес с https://
+# WEBHOOK_PATH="/webhook"  # Путь для вебхука (по умолчанию: /webhook)
+# WEBAPP_HOST="0.0.0.0"  # Хост для веб-сервера (по умолчанию: 0.0.0.0)
+# WEBAPP_PORT=10000  # Порт для веб-сервера (по умолчанию: 10000)
 ```
 
 > Где взять токен: [@BotFather](https://t.me/BotFather).
@@ -147,6 +167,14 @@ TELEGRAM_USER_ID="ваш_telegram_id"
 ```bash
 python main.py
 ```
+
+### Использование вебхуков
+
+Для запуска бота с вебхуками, вам нужно:
+1. Иметь домен с SSL-сертификатом или публичный IP-адрес
+2. Раскомментировать и настроить параметры WEBHOOK_* в файле `.env`
+3. Убедиться, что порт открыт в вашем фаерволе
+4. Запустить бота: `python main.py`
 
 ---
 
@@ -231,6 +259,12 @@ Create a `.env` file in the root:
 ```env
 TELEGRAM_BOT_TOKEN="your_bot_token_here"
 TELEGRAM_USER_ID="your_telegram_id"
+
+# Webhook settings (optional)
+# WEBHOOK_HOST="https://your-domain.com"  # Your domain or public IP with https://
+# WEBHOOK_PATH="/webhook"  # Path for webhook (default: /webhook)
+# WEBAPP_HOST="0.0.0.0"  # Host to bind the web server to (default: 0.0.0.0)
+# WEBAPP_PORT=10000  # Port to run the web server on (default: 10000)
 ```
 
 > Where to get the token: [@BotFather](https://t.me/BotFather).
@@ -241,6 +275,14 @@ Launch:
 ```bash
 python main.py
 ```
+
+### Using Webhooks
+
+To run the bot with webhooks, you need to:
+1. Have a domain with an SSL certificate or a public IP address
+2. Uncomment and configure the WEBHOOK_* parameters in the `.env` file
+3. Ensure the port is open in your firewall
+4. Run the bot: `python main.py`
 
 ---
 
