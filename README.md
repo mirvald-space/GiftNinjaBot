@@ -78,7 +78,7 @@ python main.py
 
 Проект распространяется по лицензии [MIT License](LICENSE).
 
-Исходный код частично основан на открытом проекте [TelegramGiftsBot](https://github.com/leozizu/TelegramGiftsBot), автор — Aleksey (leozizu).  
+Исходный код основан на открытом проекте [TelegramGiftsBot](https://github.com/leozizu/TelegramGiftsBot), автор — Aleksey (leozizu).  
 Использование и модификация исходного кода выполнены в соответствии с условиями лицензии MIT.  
 Все изменения и доработки отражены в истории этого репозитория.
 
