@@ -1,6 +1,7 @@
 # --- Standard libraries ---
 import time
 import logging
+from typing import Optional, List, Dict
 
 # --- Third-party libraries ---
 from aiogram import BaseMiddleware
@@ -16,7 +17,7 @@ class RateLimitMiddleware(BaseMiddleware):
     The limitation applies separately for each command and user.
     Users from the allowed_user_ids list are not limited.
     """
-    def __init__(self, commands_limits: dict = None, allowed_user_ids: list[int] = None):
+    def __init__(self, commands_limits: Optional[Dict[str, int]] = None, allowed_user_ids: Optional[List[int]] = None):
         """
         :param commands_limits: Dictionary with limits in the format {command: interval_in_seconds}
         :param allowed_user_ids: List of user_ids allowed to ignore limitations
@@ -34,16 +35,18 @@ class RateLimitMiddleware(BaseMiddleware):
         user_id = None
         command = None
 
-        if isinstance(event, Message):
+        if isinstance(event, Message) and event.from_user:
             user_id = event.from_user.id
             command = event.text.split()[0] if event.text else None
-        elif isinstance(event, CallbackQuery):
+        elif isinstance(event, CallbackQuery) and event.from_user:
             user_id = event.from_user.id
             command = event.data
 
         if user_id is None or command is None:
             return await handler(event, data)
 
+        # В публичном режиме мы все равно проверяем частоту запросов для защиты от спама
+        # Но мы можем добавить некоторых пользователей в исключения
         if user_id in self.allowed_user_ids:
             return await handler(event, data)
 

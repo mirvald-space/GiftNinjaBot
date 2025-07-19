@@ -57,9 +57,10 @@ WEBAPP_HOST = os.getenv("WEBAPP_HOST", "0.0.0.0")
 WEBAPP_PORT = int(os.getenv("WEBAPP_PORT", "10000"))
 
 default_config = DEFAULT_CONFIG(USER_ID)
-ALLOWED_USER_IDS = []
-ALLOWED_USER_IDS.append(USER_ID)
-add_allowed_user(USER_ID)
+# В публичном режиме не используем список разрешенных пользователей     
+# ALLOWED_USER_IDS = []
+# ALLOWED_USER_IDS.append(USER_ID)
+# add_allowed_user(USER_ID)
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -284,14 +285,15 @@ async def main() -> None:
     dp = Dispatcher(storage=MemoryStorage())
     dp.message.middleware(RateLimitMiddleware(
         commands_limits={"/start": 10, "/withdraw_all": 10, "/refund": 10}, 
-        allowed_user_ids=ALLOWED_USER_IDS
+        allowed_user_ids=[] # Пустой список - разрешаем всем
     ))
     dp.callback_query.middleware(RateLimitMiddleware(
         commands_limits={"guest_deposit_menu": 10},
-        allowed_user_ids=ALLOWED_USER_IDS
+        allowed_user_ids=[] # Пустой список - разрешаем всем
     ))
-    dp.message.middleware(AccessControlMiddleware(ALLOWED_USER_IDS))
-    dp.callback_query.middleware(AccessControlMiddleware(ALLOWED_USER_IDS))
+    # Используем AccessControlMiddleware без ограничений доступа
+    dp.message.middleware(AccessControlMiddleware())
+    dp.callback_query.middleware(AccessControlMiddleware())
 
     register_wizard_handlers(dp)
     register_catalog_handlers(dp)

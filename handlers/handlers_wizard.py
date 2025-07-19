@@ -13,9 +13,8 @@ from aiogram.exceptions import TelegramBadRequest, TelegramAPIError
 from services.config import get_valid_config, get_target_display, save_config
 from services.menu import update_menu, payment_keyboard
 from services.balance import refresh_balance, refund_all_star_payments
-from services.config import CURRENCY, MAX_PROFILES, ALLOWED_USER_IDS, add_profile, remove_profile, update_profile
+from services.config import CURRENCY, MAX_PROFILES, add_profile, remove_profile, update_profile
 from services.userbot import is_userbot_active, userbot_send_self, delete_userbot_session, start_userbot, continue_userbot_signin, finish_userbot_signin
-from middlewares.access_control import show_guest_menu
 from utils.misc import now_str, is_valid_profile_name, PHONE_REGEX, API_HASH_REGEX
 
 logger = logging.getLogger(__name__)
@@ -1615,29 +1614,26 @@ async def guest_deposit_amount_input(message: Message, state: FSMContext):
 @wizard_router.message(Command("withdraw_all"))
 async def withdraw_all_handler(message: Message):
     """
-    Requests confirmation for withdrawing all stars from the balance.
+    Command to withdraw all stars from the bot's balance.
     """
-    if message.from_user.id not in ALLOWED_USER_IDS:
-            await show_guest_menu(message)
-            return
-    
-    balance = await refresh_balance(message.bot)
-    if balance == 0:
-        await message.answer("⚠️ No stars found for refund.")
-        await update_menu(bot=message.bot, chat_id=message.chat.id, user_id=message.from_user.id, message_id=message.message_id)
+    # В публичном режиме разрешаем всем пользователям
+    user_id = message.from_user.id
+    config = await get_valid_config(user_id)
+    balance = config.get("BALANCE", 0)
+
+    if balance <= 0:
+        await message.answer("⚠️ <b>No stars</b> on the balance.")
         return
-    
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="✅ Yes", callback_data="withdraw_all_confirm"),
-                InlineKeyboardButton(text="❌ No", callback_data="withdraw_all_cancel"),
-            ]
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Yes", callback_data="withdraw_all_confirm"),
+            InlineKeyboardButton(text="❌ No", callback_data="withdraw_all_cancel")
         ]
-    )
+    ])
     await message.answer(
-        "⚠️ Are you sure you want to withdraw all stars?",
-        reply_markup=keyboard,
+        f"⚠️ <b>Withdraw all stars</b> ({balance:,} ★)?",
+        reply_markup=kb
     )
 
 
@@ -1690,44 +1686,37 @@ async def withdraw_all_cancel(call: CallbackQuery):
 @wizard_router.message(Command("refund"))
 async def refund_handler(message: Message):
     """
-    Processes the /refund command.
+    Command for returning stars by transaction ID.
+    Format: /refund USER_ID TRANSACTION_ID
     """
-    if message.from_user.id not in ALLOWED_USER_IDS:
-        await show_guest_menu(message)
-        return
-    
-    if await try_cancel(message, None):
-        return
-    
-    parts = message.text.strip().split()
-
+    # В публичном режиме разрешаем всем пользователям
+    parts = message.text.split()
     if len(parts) != 3:
         await message.answer(
-            "🚫 Invalid command format."
+            "⚠️ <b>Invalid format.</b>\n\n"
+            "Format: <code>/refund USER_ID TRANSACTION_ID</code>\n\n"
+            "Example: <code>/refund 123456789 12345678901234567890_123456789_external</code>"
         )
-        await update_menu(bot=message.bot, chat_id=message.chat.id, user_id=message.from_user.id, message_id=message.message_id)
         return
 
-    _, user_id_str, txn_id = parts
-
     try:
-        user_id = int(user_id_str)
+        target_user_id = int(parts[1])
+        transaction_id = parts[2]
     except ValueError:
-        await message.answer("🚫 Invalid format for <code>[user_id]</code>. Use an integer.")
-        await update_menu(bot=message.bot, chat_id=message.chat.id, user_id=message.from_user.id, message_id=message.message_id)
+        await message.answer("⚠️ <b>Invalid USER_ID.</b> It must be a number.")
         return
 
     try:
         await message.bot.refund_star_payment(
-            user_id=user_id,
-            telegram_payment_charge_id=txn_id
+            user_id=target_user_id,
+            telegram_payment_charge_id=transaction_id
         )
-        await message.answer(f"✅ Refund completed for transaction <code>{txn_id}</code> for user <code>{user_id}</code>.")
+        await message.answer(f"✅ Refund completed for transaction <code>{transaction_id}</code> for user <code>{target_user_id}</code>.")
         await update_menu(bot=message.bot, chat_id=message.chat.id, user_id=message.from_user.id, message_id=message.message_id)
     except Exception as e:
         error_text = str(e)
         short_error = error_text.split(":")[-1].strip()
-        await message.answer(f"🚫 Error when refunding transaction <code>{txn_id}</code>:\n\n<code>{short_error}</code>")
+        await message.answer(f"🚫 Error when refunding transaction <code>{transaction_id}</code>:\n\n<code>{short_error}</code>")
         await update_menu(bot=message.bot, chat_id=message.chat.id, user_id=message.from_user.id, message_id=message.message_id)
 
 

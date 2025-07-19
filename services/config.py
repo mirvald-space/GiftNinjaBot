@@ -16,10 +16,12 @@ DEV_MODE = False # Purchase of test gifts
 MAX_PROFILES = 3 # Maximum message length is 4096 characters
 PURCHASE_COOLDOWN = 0.3 # Number of purchases per second
 USERBOT_UPDATE_COOLDOWN = 50 # Base waiting time in seconds for requesting gift list through userbot
-ALLOWED_USER_IDS = []
+# В публичном режиме не используем список разрешенных пользователей
+# ALLOWED_USER_IDS = []
 
 def add_allowed_user(user_id):
-    ALLOWED_USER_IDS.append(user_id)
+    # В публичном режиме эта функция ничего не делает
+    pass
 
 def DEFAULT_PROFILE(user_id: int) -> dict:
     """Creates a profile with default settings for the specified user."""

@@ -1,18 +1,17 @@
 # --- Third-party libraries ---
-from aiogram import F
+from aiogram import F, Bot
 from aiogram.filters import CommandStart
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, Message
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 
 # --- Internal modules ---
-from services.config import get_valid_config, save_config, format_config_summary, get_target_display, ALLOWED_USER_IDS
+from services.config import get_valid_config, save_config, format_config_summary, get_target_display
 from services.menu import update_menu, config_action_keyboard 
 from services.balance import refresh_balance
 from services.buy_bot import buy_gift
-from middlewares.access_control import show_guest_menu
 
-def register_main_handlers(dp, bot, version):
+def register_main_handlers(dp, bot: Bot, version):
     """
     Registers the main handlers for the main menu, start and control commands.
     """
@@ -23,10 +22,7 @@ def register_main_handlers(dp, bot, version):
         Handles the /start command - updates the balance and shows the main menu.
         Clears all FSM states for the user.
         """
-        if message.from_user.id not in ALLOWED_USER_IDS:
-            await show_guest_menu(message)
-            return
-        
+        # В публичном режиме разрешаем доступ всем пользователям
         await state.clear()
         await refresh_balance(bot)
         await update_menu(bot=bot, chat_id=message.chat.id, user_id=message.from_user.id, message_id=message.message_id)
@@ -142,12 +138,12 @@ def register_main_handlers(dp, bot, version):
             await call.message.answer("⚠️ Purchase of a gift 🧸 for ★15 is not possible.\n"
                                       "💰 Top up the balance! Check the recipient's address!\n"
                                       "🚦 Status changed to 🔴 (inactive).")
-            await update_menu(bot=bot, chat_id=call.message.chat.id, user_id=call.from_user.id, message_id=call.message.message_id)
+            await update_menu(bot=call.bot, chat_id=call.message.chat.id, user_id=call.from_user.id, message_id=call.message.message_id)
             return
 
         await call.answer()
         await call.message.answer(f"✅ Gift 🧸 for ★15 purchased. Recipient: {target_display}.")
-        await update_menu(bot=bot, chat_id=call.message.chat.id, user_id=call.from_user.id, message_id=call.message.message_id)
+        await update_menu(bot=call.bot, chat_id=call.message.chat.id, user_id=call.from_user.id, message_id=call.message.message_id)
 
 
     @dp.callback_query(F.data == "reset_bought")
@@ -204,19 +200,7 @@ def register_main_handlers(dp, bot, version):
         """
         Processing a successful balance top-up through Telegram Invoice.
         """
-        if message.from_user.id not in ALLOWED_USER_IDS:
-            transaction_id = message.successful_payment.telegram_payment_charge_id
-            user_id = message.from_user.id
-            bot_user = await message.bot.get_me()
-            await message.answer(
-                f"✅ Balance successfully topped up.\n\n"
-                f"To return the balance, the owner of the bot @{bot_user.username} must run the command:\n\n"
-                f"<code>/refund {user_id} {transaction_id}</code>",
-                message_effect_id="5104841245755180586"
-            )
-            await show_guest_menu(message)
-            return
-        
+        # В публичном режиме разрешаем доступ всем пользователям
         await message.answer(
             f'✅ Balance successfully topped up.',
             message_effect_id="5104841245755180586"
