@@ -181,13 +181,16 @@ def register_main_handlers(dp, bot: Bot, version):
         profiles = await get_user_profiles(user_id)
         
         # Сбрасываем счетчики во всех профилях
+        from services.database import update_user_profile
         for profile in profiles:
             profile["bought"] = 0
             profile["spent"] = 0
             profile["done"] = False
+            # Обновляем каждый профиль в таблице profiles
+            await update_user_profile(profile["id"], profile)
         
-        # Обновляем профили и устанавливаем статус неактивный
-        await update_user_data(user_id, {"profiles": profiles, "active": False})
+        # Устанавливаем статус неактивный
+        await update_user_data(user_id, {"active": False})
         
         # Получаем данные для отображения меню
         menu_text = await format_supabase_summary(user_id)

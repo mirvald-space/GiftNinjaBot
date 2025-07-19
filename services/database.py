@@ -258,51 +258,69 @@ async def update_user_userbot_balance(user_id: int, delta: int) -> int:
 
 async def get_user_userbot_data(user_id: int) -> Union[Dict[str, Any], None]:
     """
-    Получение данных юзербота пользователя.
+    Получение данных юзербота пользователя из таблицы userbots.
     """
     try:
-        user_data = await get_user_data(user_id)
-        userbot_data = {
-            "api_id": user_data.get("userbot_api_id"),
-            "api_hash": user_data.get("userbot_api_hash"),
-            "phone": user_data.get("userbot_phone"),
-            "user_id": user_data.get("userbot_user_id"),
-            "username": user_data.get("userbot_username"),
-            "balance": user_data.get("userbot_balance", 0),
-            "enabled": user_data.get("userbot_enabled", False)
+        supabase = get_supabase_client()
+        
+        # Получаем данные юзербота из таблицы userbots
+        response = supabase.table("userbots").select("*").eq("user_id", user_id).execute()
+        
+        if len(response.data) == 0:
+            # Если записи нет, возвращаем None
+            return None
+        
+        userbot_data = response.data[0]
+        return {
+            "api_id": userbot_data.get("api_id"),
+            "api_hash": userbot_data.get("api_hash"),
+            "phone": userbot_data.get("phone"),
+            "user_id": userbot_data.get("user_id"),
+            "username": userbot_data.get("username"),
+            "balance": 0,  # Баланс юзербота хранится в таблице users
+            "enabled": userbot_data.get("enabled", False)
         }
-        return userbot_data
     except Exception as e:
         logger.error(f"Ошибка при получении данных юзербота пользователя: {e}")
         return None
 
 async def update_user_userbot_data(user_id: int, data: Dict[str, Any]) -> Union[Dict[str, Any], None]:
     """
-    Обновление данных юзербота пользователя.
+    Обновление данных юзербота пользователя в таблице userbots.
     """
     try:
-        # Преобразуем данные юзербота в формат для хранения в таблице users
-        user_data = {
-            "userbot_api_id": data.get("api_id"),
-            "userbot_api_hash": data.get("api_hash"),
-            "userbot_phone": data.get("phone"),
-            "userbot_user_id": data.get("user_id"),
-            "userbot_username": data.get("username"),
-            "userbot_balance": data.get("balance", 0),
-            "userbot_enabled": data.get("enabled", False)
+        supabase = get_supabase_client()
+        
+        # Подготавливаем данные для таблицы userbots
+        userbot_data = {
+            "user_id": user_id,
+            "api_id": data.get("api_id"),
+            "api_hash": data.get("api_hash"),
+            "phone": data.get("phone"),
+            "username": data.get("username"),
+            "enabled": data.get("enabled", False)
         }
         
-        # Обновляем данные в таблице users
-        result = await update_user_data(user_id, user_data)
-        if result:
+        # Проверяем, существует ли запись юзербота
+        response = supabase.table("userbots").select("*").eq("user_id", user_id).execute()
+        
+        if len(response.data) == 0:
+            # Создаем новую запись
+            response = supabase.table("userbots").insert(userbot_data).execute()
+        else:
+            # Обновляем существующую запись
+            response = supabase.table("userbots").update(userbot_data).eq("user_id", user_id).execute()
+        
+        if response.data:
+            result = response.data[0]
             return {
-                "api_id": result.get("userbot_api_id"),
-                "api_hash": result.get("userbot_api_hash"),
-                "phone": result.get("userbot_phone"),
-                "user_id": result.get("userbot_user_id"),
-                "username": result.get("userbot_username"),
-                "balance": result.get("userbot_balance", 0),
-                "enabled": result.get("userbot_enabled", False)
+                "api_id": result.get("api_id"),
+                "api_hash": result.get("api_hash"),
+                "phone": result.get("phone"),
+                "user_id": result.get("user_id"),
+                "username": result.get("username"),
+                "balance": 0,  # Баланс юзербота хранится в таблице users
+                "enabled": result.get("enabled", False)
             }
         return None
     except Exception as e:

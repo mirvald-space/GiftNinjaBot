@@ -53,6 +53,10 @@ async def get_valid_config(user_id: int) -> dict:
     user_data = await get_user_data(user_id)
     profiles = await get_user_profiles(user_id)
     
+    # Получаем данные юзербота из отдельной таблицы
+    from services.database import get_user_userbot_data
+    userbot_data = await get_user_userbot_data(user_id)
+    
     # Преобразуем данные из Supabase в формат, совместимый со старыми функциями
     config = {
         "BALANCE": user_data.get("balance", 0),
@@ -60,13 +64,13 @@ async def get_valid_config(user_id: int) -> dict:
         "LAST_MENU_MESSAGE_ID": user_data.get("last_menu_message_id"),
         "PROFILES": profiles if profiles else [DEFAULT_PROFILE(user_id)],
         "USERBOT": {
-            "API_ID": user_data.get("userbot_api_id"),
-            "API_HASH": user_data.get("userbot_api_hash"),
-            "PHONE": user_data.get("userbot_phone"),
-            "USER_ID": user_data.get("userbot_user_id"),
-            "USERNAME": user_data.get("userbot_username"),
-            "BALANCE": user_data.get("userbot_balance", 0),
-            "ENABLED": user_data.get("userbot_enabled", False)
+            "API_ID": userbot_data.get("api_id") if userbot_data else None,
+            "API_HASH": userbot_data.get("api_hash") if userbot_data else None,
+            "PHONE": userbot_data.get("phone") if userbot_data else None,
+            "USER_ID": userbot_data.get("user_id") if userbot_data else None,
+            "USERNAME": userbot_data.get("username") if userbot_data else None,
+            "BALANCE": user_data.get("userbot_balance", 0),  # Баланс юзербота хранится в users
+            "ENABLED": userbot_data.get("enabled", False) if userbot_data else False
         }
     }
     return config
@@ -96,28 +100,27 @@ async def save_config(config: dict):
     user_data = {
         "balance": config.get("BALANCE", 0),
         "active": config.get("ACTIVE", False),
-        "last_menu_message_id": config.get("LAST_MENU_MESSAGE_ID")
+        "last_menu_message_id": config.get("LAST_MENU_MESSAGE_ID"),
+        "userbot_balance": config.get("USERBOT", {}).get("BALANCE", 0)  # Баланс юзербота в users
     }
-    
-    # Обновляем данные юзербота
-    userbot_data = config.get("USERBOT", {})
-    if userbot_data:
-        user_data.update({
-            "userbot_api_id": userbot_data.get("API_ID"),
-            "userbot_api_hash": userbot_data.get("API_HASH"),
-            "userbot_phone": userbot_data.get("PHONE"),
-            "userbot_user_id": userbot_data.get("USER_ID"),
-            "userbot_username": userbot_data.get("USERNAME"),
-            "userbot_balance": userbot_data.get("BALANCE", 0),
-            "userbot_enabled": userbot_data.get("ENABLED", False)
-        })
     
     # Обновляем данные пользователя в Supabase
     await update_user_data(user_id, user_data)
     
-    # Обновляем профили пользователя
-    # Эта часть должна быть реализована отдельно через функции работы с профилями
-    # в services/database.py, так как требует более сложной логики обновления
+    # Обновляем данные юзербота в отдельной таблице
+    userbot_data = config.get("USERBOT", {})
+    if userbot_data:
+        from services.database import update_user_userbot_data
+        userbot_update_data = {
+            "api_id": userbot_data.get("API_ID"),
+            "api_hash": userbot_data.get("API_HASH"),
+            "phone": userbot_data.get("PHONE"),
+            "user_id": userbot_data.get("USER_ID"),
+            "username": userbot_data.get("USERNAME"),
+            "enabled": userbot_data.get("ENABLED", False)
+        }
+        await update_user_userbot_data(user_id, userbot_update_data)
+    
     logger.info(f"Configuration saved in Supabase.")
 
 async def format_supabase_summary(user_id: int) -> str:

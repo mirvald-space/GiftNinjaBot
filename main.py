@@ -149,7 +149,11 @@ async def gift_purchase_worker(bot):
                         profile["bought"] += 1
                         profile["spent"] += gift_price
                         purchases.append({"id": gift_id, "price": gift_price})
-                        await update_user_data(USER_ID, {"profiles": profiles})
+                        
+                        # Обновляем профиль в таблице profiles
+                        from services.database import update_user_profile
+                        await update_user_profile(profile["id"], profile)
+                        
                         await asyncio.sleep(PURCHASE_COOLDOWN)
 
                         # Check: have we reached the limit after the purchase
@@ -167,7 +171,8 @@ async def gift_purchase_worker(bot):
                 if (profile["bought"] >= COUNT or profile["spent"] >= LIMIT) and not profile["done"]:
                     # Обновляем статус профиля в Supabase
                     profile["done"] = True
-                    await update_user_data(USER_ID, {"profiles": profiles})
+                    from services.database import update_user_profile
+                    await update_user_profile(profile["id"], profile)
 
                     target_display = get_target_display(profile, USER_ID)
                     summary_lines = [
