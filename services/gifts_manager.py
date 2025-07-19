@@ -58,10 +58,15 @@ def filter_gifts_by_profile(gifts: list[dict], profile: dict) -> list[dict]:
     :param profile: Dictionary with profile parameters (price range, limits)
     :return: Filtered list of gifts suitable for the profile
     """
+    min_price = profile.get("min_price", profile.get("MIN_PRICE", 0))
+    max_price = profile.get("max_price", profile.get("MAX_PRICE", 10000))
+    min_supply = profile.get("min_supply", profile.get("MIN_SUPPLY", 0))
+    max_supply = profile.get("max_supply", profile.get("MAX_SUPPLY", 10000))
+    
     return [
         g for g in gifts
-        if profile["MIN_PRICE"] <= g.get("price", 0) <= profile["MAX_PRICE"]
-        and profile["MIN_SUPPLY"] <= g.get("supply", 0) <= profile["MAX_SUPPLY"]
+        if min_price <= g.get("price", 0) <= max_price
+        and min_supply <= g.get("supply", 0) <= max_supply
     ]
 
 
@@ -76,13 +81,18 @@ async def get_best_gift_list(bot, profile: dict) -> list[dict]:
     """
     global userbot_all_gifts
 
+    min_price = profile.get("min_price", profile.get("MIN_PRICE", 0))
+    max_price = profile.get("max_price", profile.get("MAX_PRICE", 10000))
+    min_supply = profile.get("min_supply", profile.get("MIN_SUPPLY", 0))
+    max_supply = profile.get("max_supply", profile.get("MAX_SUPPLY", 10000))
+
     try:
         gifts_bot = await get_filtered_gifts(
             bot,
-            profile["MIN_PRICE"],
-            profile["MAX_PRICE"],
-            profile["MIN_SUPPLY"],
-            profile["MAX_SUPPLY"]
+            min_price,
+            max_price,
+            min_supply,
+            max_supply
         )
     except Exception as e:
         logger.error(f"Error getting gift list from bot: {e}")

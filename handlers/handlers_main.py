@@ -7,6 +7,7 @@ from aiogram.fsm.context import FSMContext
 
 # --- Internal modules ---
 from services.config import get_valid_config, save_config, format_config_summary, get_target_display
+from services.database import get_user_data, update_user_data, get_user_profiles
 from services.menu import update_menu, config_action_keyboard 
 from services.balance import refresh_balance
 from services.buy_bot import buy_gift
@@ -24,8 +25,11 @@ def register_main_handlers(dp, bot: Bot, version):
         """
         # В публичном режиме разрешаем доступ всем пользователям
         await state.clear()
-        await refresh_balance(bot)
-        await update_menu(bot=bot, chat_id=message.chat.id, user_id=message.from_user.id, message_id=message.message_id)
+        
+        # Используем Supabase для получения данных пользователя
+        user_id = message.from_user.id
+        await refresh_balance(bot, user_id)
+        await update_menu(bot=bot, chat_id=message.chat.id, user_id=user_id, message_id=message.message_id)
 
 
     @dp.callback_query(F.data == "main_menu")
@@ -36,12 +40,14 @@ def register_main_handlers(dp, bot: Bot, version):
         """
         await state.clear()
         await call.answer()
-        config = await get_valid_config(call.from_user.id)
-        await refresh_balance(call.bot)
+        
+        # Используем Supabase для получения данных пользователя
+        user_id = call.from_user.id
+        await refresh_balance(call.bot, user_id)
         await update_menu(
             bot=call.bot,
             chat_id=call.message.chat.id,
-            user_id=call.from_user.id,
+            user_id=user_id,
             message_id=call.message.message_id
         )
 
@@ -51,10 +57,18 @@ def register_main_handlers(dp, bot: Bot, version):
         """
         Shows detailed instructions for working with the bot.
         """
-        config = await get_valid_config(call.from_user.id)
-        # By default, the first profile
-        profile = config["PROFILES"][0]
-        target_display = get_target_display(profile, call.from_user.id)
+        user_id = call.from_user.id
+        
+        # Получаем профили пользователя из Supabase
+        profiles = await get_user_profiles(user_id)
+        # По умолчанию первый профиль
+        profile = profiles[0] if profiles else None
+        
+        if profile:
+            target_display = get_target_display(profile, user_id)
+        else:
+            target_display = "yourself"
+            
         bot_info = await call.bot.get_me()
         bot_username = bot_info.username
         help_text = (
@@ -117,16 +131,24 @@ def register_main_handlers(dp, bot: Bot, version):
         Purchase of a test gift to check the bot's work.
         """
         gift_id = '5170233102089322756'
-        config = await get_valid_config(call.from_user.id)
-        # Use the first profile by default
-        profile = config["PROFILES"][0]
-        TARGET_USER_ID = profile["TARGET_USER_ID"]
-        TARGET_CHAT_ID = profile["TARGET_CHAT_ID"]
-        target_display = get_target_display(profile, call.from_user.id)
+        user_id = call.from_user.id
+        
+        # Получаем профили пользователя из Supabase
+        profiles = await get_user_profiles(user_id)
+        # По умолчанию первый профиль
+        profile = profiles[0] if profiles else None
+        
+        if not profile:
+            await call.answer("Error: Profile not found")
+            return
+            
+        TARGET_USER_ID = profile.get("target_user_id")
+        TARGET_CHAT_ID = profile.get("target_chat_id")
+        target_display = get_target_display(profile, user_id)
 
         success = await buy_gift(
             bot=call.bot,
-            env_user_id=call.from_user.id,
+            env_user_id=user_id,
             gift_id=gift_id,
             user_id=TARGET_USER_ID,
             chat_id=TARGET_CHAT_ID,
@@ -138,12 +160,14 @@ def register_main_handlers(dp, bot: Bot, version):
             await call.message.answer("⚠️ Purchase of a gift 🧸 for ★15 is not possible.\n"
                                       "💰 Top up the balance! Check the recipient's address!\n"
                                       "🚦 Status changed to 🔴 (inactive).")
-            await update_menu(bot=call.bot, chat_id=call.message.chat.id, user_id=call.from_user.id, message_id=call.message.message_id)
+            # Обновляем статус пользователя в базе данных
+            await update_user_data(user_id, {"active": False})
+            await update_menu(bot=call.bot, chat_id=call.message.chat.id, user_id=user_id, message_id=call.message.message_id)
             return
 
         await call.answer()
         await call.message.answer(f"✅ Gift 🧸 for ★15 purchased. Recipient: {target_display}.")
-        await update_menu(bot=call.bot, chat_id=call.message.chat.id, user_id=call.from_user.id, message_id=call.message.message_id)
+        await update_menu(bot=call.bot, chat_id=call.message.chat.id, user_id=user_id, message_id=call.message.message_id)
 
 
     @dp.callback_query(F.data == "reset_bought")
@@ -151,19 +175,33 @@ def register_main_handlers(dp, bot: Bot, version):
         """
         Reset counters of purchased gifts and completion statuses for all profiles.
         """
-        config = await get_valid_config(call.from_user.id)        
-        # Reset counters in all profiles
-        for profile in config["PROFILES"]:
-            profile["BOUGHT"] = 0
-            profile["SPENT"] = 0
-            profile["DONE"] = False
+        user_id = call.from_user.id
+        
+        # Получаем данные пользователя и его профили из Supabase
+        user_data = await get_user_data(user_id)
+        profiles = await get_user_profiles(user_id)
+        
+        # Сбрасываем счетчики во всех профилях
+        for profile in profiles:
+            profile["bought"] = 0
+            profile["spent"] = 0
+            profile["done"] = False
+            # Обновляем профиль в базе данных
+            await update_user_data(user_id, {"profiles": profiles})
+        
+        # Устанавливаем статус неактивный
+        await update_user_data(user_id, {"active": False})
+        
+        # Используем старый метод для отображения информации
+        config = await get_valid_config(user_id)
         config["ACTIVE"] = False
         await save_config(config)
-        info = format_config_summary(config, call.from_user.id)
+        info = format_config_summary(config, user_id)
+        
         try:
             await call.message.edit_text(
                 info,
-                reply_markup=config_action_keyboard(config["ACTIVE"])
+                reply_markup=config_action_keyboard(False)
             )
         except TelegramBadRequest as e:
             if "message is not modified" not in str(e):
@@ -176,13 +214,24 @@ def register_main_handlers(dp, bot: Bot, version):
         """
         Switching the bot's status: active/inactive.
         """
-        config = await get_valid_config(call.from_user.id)
-        config["ACTIVE"] = not config.get("ACTIVE", False)
+        user_id = call.from_user.id
+        
+        # Получаем данные пользователя из Supabase
+        user_data = await get_user_data(user_id)
+        
+        # Переключаем статус
+        new_active = not user_data.get("active", False)
+        await update_user_data(user_id, {"active": new_active})
+        
+        # Используем старый метод для отображения информации
+        config = await get_valid_config(user_id)
+        config["ACTIVE"] = new_active
         await save_config(config)
-        info = format_config_summary(config, call.from_user.id)
+        info = format_config_summary(config, user_id)
+        
         await call.message.edit_text(
             info,
-            reply_markup=config_action_keyboard(config["ACTIVE"])
+            reply_markup=config_action_keyboard(new_active)
         )
         await call.answer("Status updated")
 
@@ -200,10 +249,13 @@ def register_main_handlers(dp, bot: Bot, version):
         """
         Processing a successful balance top-up through Telegram Invoice.
         """
-        # В публичном режиме разрешаем доступ всем пользователям
+        user_id = message.from_user.id
+        
         await message.answer(
             f'✅ Balance successfully topped up.',
             message_effect_id="5104841245755180586"
         )
-        balance = await refresh_balance(bot)
-        await update_menu(bot=bot, chat_id=message.chat.id, user_id=message.from_user.id, message_id=message.message_id)
+        
+        # Обновляем баланс пользователя в базе данных
+        balance = await refresh_balance(bot, user_id)
+        await update_menu(bot=bot, chat_id=message.chat.id, user_id=user_id, message_id=message.message_id)

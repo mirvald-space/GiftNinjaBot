@@ -5,3 +5,4 @@ Kurigram==2.2.6
 TgCrypto
 aiohttp
 aiohttp-socks
+supabase>=2.17.0

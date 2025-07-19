@@ -25,6 +25,7 @@ from services.config import (
     VERSION,
     PURCHASE_COOLDOWN
 )
+from services.database import get_user_data, update_user_data, get_user_profiles
 from services.menu import update_menu
 from services.balance import refresh_balance
 from services.gifts_manager import get_best_gift_list, userbot_gifts_updater
@@ -86,21 +87,33 @@ async def gift_purchase_worker(bot):
             progress_made = False  # Was there progress on profiles in this run
             any_success = True
 
-            for profile_index, profile in enumerate(config["PROFILES"]):
+            # Получаем данные пользователя из Supabase
+            user_data = await get_user_data(USER_ID)
+            active = user_data.get("active", False)
+            
+            # Если пользователь неактивен, пропускаем
+            if not active:
+                await asyncio.sleep(1)
+                continue
+                
+            # Получаем профили пользователя из Supabase
+            profiles = await get_user_profiles(USER_ID)
+
+            for profile_index, profile in enumerate(profiles):
                 # Skip completed profiles
-                if profile.get("DONE"):
+                if profile.get("done"):
                     continue
                 # Skip profiles with disabled userbot
-                sender = profile.get("SENDER", "bot")
+                sender = profile.get("sender", "bot")
                 if sender == "userbot":
                     userbot_config = config.get("USERBOT", {})
                     if not userbot_config.get("ENABLED", False):
                         continue
 
-                COUNT = profile["COUNT"]
-                LIMIT = profile.get("LIMIT", 0)
-                TARGET_USER_ID = profile["TARGET_USER_ID"]
-                TARGET_CHAT_ID = profile["TARGET_CHAT_ID"]
+                COUNT = profile["count"]
+                LIMIT = profile.get("limit", 0)
+                TARGET_USER_ID = profile["target_user_id"]
+                TARGET_CHAT_ID = profile["target_chat_id"]
 
                 filtered_gifts = await get_best_gift_list(bot, profile)
 
@@ -108,8 +121,8 @@ async def gift_purchase_worker(bot):
                     continue
 
                 purchases = []
-                before_bought = profile["BOUGHT"]
-                before_spent = profile["SPENT"]
+                before_bought = profile["bought"]
+                before_spent = profile["spent"]
 
                 for gift in filtered_gifts:
                     gift_id = gift["id"]
@@ -118,10 +131,10 @@ async def gift_purchase_worker(bot):
                     sticker_file_id = gift["sticker_file_id"]
 
                     # Check the limit before each purchase
-                    while (profile["BOUGHT"] < COUNT and
-                           profile["SPENT"] + gift_price <= LIMIT):
+                    while (profile["bought"] < COUNT and
+                           profile["spent"] + gift_price <= LIMIT):
 
-                        sender = profile.get("SENDER", "bot")
+                        sender = profile.get("sender", "bot")
                         if sender == "bot":
                             success = await buy_gift(
                                 bot=bot,
@@ -150,38 +163,36 @@ async def gift_purchase_worker(bot):
                             any_success = False
                             break  # Failed to buy - try the next gift
 
-                        config = await get_valid_config(USER_ID)
-                        profile = config["PROFILES"][profile_index]
-                        profile["BOUGHT"] += 1
-                        profile["SPENT"] += gift_price
+                        # Обновляем данные профиля в Supabase
+                        profile["bought"] += 1
+                        profile["spent"] += gift_price
                         purchases.append({"id": gift_id, "price": gift_price})
-                        await save_config(config)
+                        await update_user_data(USER_ID, {"profiles": profiles})
                         await asyncio.sleep(PURCHASE_COOLDOWN)
 
                         # Check: have we reached the limit after the purchase
-                        if profile["SPENT"] >= LIMIT:
+                        if profile["spent"] >= LIMIT:
                             break
 
-                    if profile["BOUGHT"] >= COUNT or profile["SPENT"] >= LIMIT:
+                    if profile["bought"] >= COUNT or profile["spent"] >= LIMIT:
                         break  # Reached the limit either by quantity or by amount
 
-                after_bought = profile["BOUGHT"]
-                after_spent = profile["SPENT"]
+                after_bought = profile["bought"]
+                after_spent = profile["spent"]
                 made_local_progress = (after_bought > before_bought) or (after_spent > before_spent)
 
                 # Profile is fully completed: either by quantity or by limit
-                if (profile["BOUGHT"] >= COUNT or profile["SPENT"] >= LIMIT) and not profile["DONE"]:
-                    config = await get_valid_config(USER_ID)
-                    profile = config["PROFILES"][profile_index]
-                    profile["DONE"] = True
-                    await save_config(config)
+                if (profile["bought"] >= COUNT or profile["spent"] >= LIMIT) and not profile["done"]:
+                    # Обновляем статус профиля в Supabase
+                    profile["done"] = True
+                    await update_user_data(USER_ID, {"profiles": profiles})
 
                     target_display = get_target_display(profile, USER_ID)
                     summary_lines = [
                         f"\n┌✅ <b>Profile {profile_index+1}</b>\n"
                         f"├👤 <b>Recipient:</b> {target_display}\n"
-                        f"├💸 <b>Spent:</b> {profile['SPENT']:,} / {LIMIT:,} ★\n"
-                        f"└🎁 <b>Purchased </b>{profile['BOUGHT']} of {COUNT}:"
+                        f"├💸 <b>Spent:</b> {profile['spent']:,} / {LIMIT:,} ★\n"
+                        f"└🎁 <b>Purchased </b>{profile['bought']} of {COUNT}:"
                     ]
                     gift_summary = {}
                     for p in purchases:
@@ -200,17 +211,17 @@ async def gift_purchase_worker(bot):
 
                     logger.info(f"Profile #{profile_index+1} completed")
                     progress_made = True
-                    await refresh_balance(bot)
+                    await refresh_balance(bot, USER_ID)
                     continue  # To the next profile
 
                 # If nothing was bought - balance/limit/gifts ran out
-                if (profile["BOUGHT"] < COUNT or profile["SPENT"] < LIMIT) and not profile["DONE"] and made_local_progress:
+                if (profile["bought"] < COUNT or profile["spent"] < LIMIT) and not profile["done"] and made_local_progress:
                     target_display = get_target_display(profile, USER_ID)
                     summary_lines = [
                         f"\n┌⚠️ <b>Profile {profile_index+1}</b> (partially)\n"
                         f"├👤 <b>Recipient:</b> {target_display}\n"
-                        f"├💸 <b>Spent:</b> {profile['SPENT']:,} / {LIMIT:,} ★\n"
-                        f"└🎁 <b>Purchased </b>{profile['BOUGHT']} of {COUNT}:"
+                        f"├💸 <b>Spent:</b> {profile['spent']:,} / {LIMIT:,} ★\n"
+                        f"└🎁 <b>Purchased </b>{profile['bought']} of {COUNT}:"
                     ]
                     gift_summary = {}
                     for p in purchases:
@@ -229,15 +240,15 @@ async def gift_purchase_worker(bot):
 
                     logger.warning(f"Profile #{profile_index+1} not completed")
                     progress_made = True
-                    await refresh_balance(bot)
+                    await refresh_balance(bot, USER_ID)
                     continue  # To the next profile
 
             if not any_success and not progress_made:
                 logger.warning(
                     f"Could not buy a single gift in any profile (all buy_gift attempts were unsuccessful)"
                 )
-                config["ACTIVE"] = False
-                await save_config(config)
+                # Обновляем статус пользователя в Supabase
+                await update_user_data(USER_ID, {"active": False})
                 text = ("⚠️ Suitable gifts found, but <b>failed</b> to buy."
                         "\n💰 Top up your balance! Check the recipient's address!"
                         "\n🚦 Status changed to 🔴 (inactive).")
@@ -248,117 +259,76 @@ async def gift_purchase_worker(bot):
 
             # After processing all profiles:
             if progress_made:
-                config["ACTIVE"] = not all(p.get("DONE") for p in config["PROFILES"])
-                await save_config(config)
-                logger.info("Report: at least one profile processed, sending summary.")
-                text = "🍀 <b>Profile report:</b>\n"
-                text += "\n".join(report_message_lines) if report_message_lines else "⚠️ No purchases made."
-                message = await bot.send_message(chat_id=USER_ID, text=text)
-                await update_menu(
-                    bot=bot, chat_id=USER_ID, user_id=USER_ID, message_id=message.message_id
-                )
+                if report_message_lines:
+                    report_text = "\n".join(report_message_lines)
+                    message = await bot.send_message(chat_id=USER_ID, text=report_text)
+                    await update_menu(
+                        bot=bot, chat_id=USER_ID, user_id=USER_ID, message_id=message.message_id
+                    )
 
-            if all(p.get("DONE") for p in config["PROFILES"]) and config["ACTIVE"]:
-                config["ACTIVE"] = False
-                await save_config(config)
-                text = "✅ All profiles <b>completed</b>!\n⚠️ Click ♻️ <b>Reset</b> or ✏️ <b>Edit</b>!"
-                message = await bot.send_message(chat_id=USER_ID, text=text)
-                await update_menu(
-                    bot=bot, chat_id=USER_ID, user_id=USER_ID, message_id=message.message_id
-                )
+            await asyncio.sleep(5)  # Wait a bit before the next iteration
 
         except Exception as e:
-            logger.error(f"Error in gift_purchase_worker: {e}", exc_info=True)
-            await asyncio.sleep(5)
+            logger.error(f"Error in gift_purchase_worker: {e}")
+            await asyncio.sleep(5)  # Wait a bit in case of error
 
 
 async def main() -> None:
     """
-    Main function that initializes the bot, dispatcher, and starts webhook server.
+    Main function for starting the bot.
     """
-    logger.info("Bot started!")
-    await migrate_config_if_needed(USER_ID)
+    # Load config
     await ensure_config(USER_ID)
+    await migrate_config_if_needed(USER_ID)
 
-    session = await get_aiohttp_session(USER_ID)
-    bot = Bot(token=TOKEN, session=session, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    # Configure bot
+    bot = Bot(
+        token=TOKEN,
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+    )
+
+    # Try to start userbot if configured
+    try:
+        await try_start_userbot_from_config(USER_ID)
+    except Exception as e:
+        logger.error(f"Failed to start userbot: {e}")
+
+    # Configure dispatcher
     dp = Dispatcher(storage=MemoryStorage())
-    dp.message.middleware(RateLimitMiddleware(
-        commands_limits={"/start": 10, "/withdraw_all": 10, "/refund": 10}, 
-        allowed_user_ids=[] # Пустой список - разрешаем всем
-    ))
-    dp.callback_query.middleware(RateLimitMiddleware(
-        commands_limits={"guest_deposit_menu": 10},
-        allowed_user_ids=[] # Пустой список - разрешаем всем
-    ))
-    # Используем AccessControlMiddleware без ограничений доступа
+    dp.message.middleware(RateLimitMiddleware())
     dp.message.middleware(AccessControlMiddleware())
     dp.callback_query.middleware(AccessControlMiddleware())
 
+    # Register handlers
+    register_main_handlers(dp, bot, VERSION)
     register_wizard_handlers(dp)
     register_catalog_handlers(dp)
-    register_main_handlers(
-        dp=dp,
-        bot=bot,
-        version=VERSION
-    )
 
-    # Start userbot if configured
-    await try_start_userbot_from_config(USER_ID)
+    # Start tasks
+    asyncio.create_task(gift_purchase_worker(bot))
+    asyncio.create_task(userbot_gifts_updater(USER_ID))
 
-    # Create tasks
-    purchase_task = asyncio.create_task(gift_purchase_worker(bot))
-    userbot_updater_task = asyncio.create_task(userbot_gifts_updater(USER_ID))
-
-    # Set up webhook
-    # Remove webhook first to ensure we don't have any previous webhook set
-    await bot.delete_webhook()
-    
+    # Start bot
     if WEBHOOK_HOST:
-        # Set up webhook only if WEBHOOK_HOST is provided
-        await bot.set_webhook(url=WEBHOOK_URL)
-        logger.info(f"Webhook set to: {WEBHOOK_URL}")
-        
-        # Create aiohttp application
+        # Webhook mode
+        logger.info(f"Starting bot in webhook mode: {WEBHOOK_URL}")
         app = web.Application()
-        
-        # Setup webhook handler
-        webhook_handler = SimpleRequestHandler(
-            dispatcher=dp,
-            bot=bot,
-        )
-        webhook_handler.register(app, path=WEBHOOK_PATH)
-        
-        # Setup application
+        SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=WEBHOOK_PATH)
         setup_application(app, dp, bot=bot)
-        
-        # Start web server
-        logger.info(f"Starting webhook server on {WEBAPP_HOST}:{WEBAPP_PORT}")
-        
-        # Вместо web.run_app, который запускает свой цикл событий
-        runner = web.AppRunner(app)
-        await runner.setup()
-        site = web.TCPSite(runner, host=WEBAPP_HOST, port=WEBAPP_PORT)
-        await site.start()
-        
-        # Бесконечный цикл для поддержания работы приложения
-        try:
-            # Ждем бесконечно или до отмены
-            await asyncio.Event().wait()
-        finally:
-            # Корректное завершение при выходе
-            await runner.cleanup()
+        await bot.set_webhook(url=WEBHOOK_URL)
+        await web._run_app(app, host=WEBAPP_HOST, port=WEBAPP_PORT)
     else:
-        # Fallback to polling if WEBHOOK_HOST is not set
-        logger.warning("WEBHOOK_HOST not set, falling back to polling")
-        await dp.start_polling(bot)
+        # Polling mode
+        logger.info("Starting bot in polling mode")
+        await bot.delete_webhook(drop_pending_updates=True)
+        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
 
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
-    except KeyboardInterrupt:
-        logger.info("Bot stopped by user")
+    except (KeyboardInterrupt, SystemExit):
+        logger.info("Bot stopped")
     except Exception as e:
-        logger.error(f"Bot stopped due to error: {e}", exc_info=True)
+        logger.error(f"Unhandled error: {e}")
         sys.exit(1)
